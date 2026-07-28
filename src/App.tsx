@@ -22,7 +22,21 @@ export default function App() {
       const saved = localStorage.getItem('recent_videos');
       if (saved) {
         try {
-          setUserVideos(JSON.parse(saved));
+          const parsed = JSON.parse(saved) as VideoMeta[];
+          setUserVideos(parsed);
+          
+          // Fetch latest metadata to get updated view counts
+          Promise.all(
+            parsed.map(v => 
+              fetch(`/api/videos/${v.id}`)
+                .then(res => res.ok ? res.json() : v)
+                .catch(() => v)
+            )
+          ).then((updatedVideos) => {
+            setUserVideos(updatedVideos);
+            // Optionally update local storage with the latest data
+            localStorage.setItem('recent_videos', JSON.stringify(updatedVideos));
+          });
         } catch (e) { }
       }
     }
@@ -171,7 +185,7 @@ export default function App() {
                           {video.originalName}
                         </Link>
                         <p className="text-[10px] text-white/40 mt-1 uppercase tracking-wider">
-                          {formatDistanceToNow(new Date(video.createdAt))} ago • {(video.size / (1024 * 1024)).toFixed(1)} MB
+                          {formatDistanceToNow(new Date(video.createdAt))} ago • {(video.size / (1024 * 1024)).toFixed(1)} MB • {video.viewCount || 0} views
                         </p>
                       </div>
                       <div className="flex items-center gap-2 shrink-0 mt-4 sm:mt-0">

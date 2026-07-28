@@ -6,4 +6,5 @@ export interface VideoMeta {
   size: number;
   createdAt: string;
   downloadUrl?: string;
+  viewCount?: number;
 }

@@ -108,7 +108,7 @@ app.post('/api/upload-complete', express.json(), async (req, res) => {
     if (process.env.CLOUDINARY_CLOUD_NAME && process.env.CLOUDINARY_API_KEY && process.env.CLOUDINARY_API_SECRET) {
       console.log('Uploading to Cloudinary...');
       try {
-        const result = await cloudinary.uploader.upload(finalPath, {
+        const result = await cloudinary.uploader.upload_large(finalPath, {
           resource_type: 'video',
           folder: 'video_uploads'
         });
@@ -148,6 +148,11 @@ app.get('/api/videos/:id', (req, res) => {
   if (!video) {
     return res.status(404).json({ error: 'Video not found' });
   }
+  
+  // Increment view count
+  video.viewCount = (video.viewCount || 0) + 1;
+  saveDb(db);
+  
   res.json(video);
 });
 
