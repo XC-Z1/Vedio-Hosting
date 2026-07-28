@@ -15,8 +15,8 @@ cloudinary.config({
 
 const app = express();
 const PORT = 3000;
-const UPLOADS_DIR = path.join(process.cwd(), 'uploads');
-const DB_FILE = path.join(process.cwd(), 'db.json');
+const UPLOADS_DIR = process.env.VERCEL ? path.join('/tmp', 'uploads') : path.join(process.cwd(), 'uploads');
+const DB_FILE = process.env.VERCEL ? path.join('/tmp', 'db.json') : path.join(process.cwd(), 'db.json');
 
 // Ensure uploads directory exists
 if (!fs.existsSync(UPLOADS_DIR)) {
@@ -189,9 +189,13 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server running on port ${PORT}`);
-  });
+  if (!process.env.VERCEL) {
+    app.listen(PORT, '0.0.0.0', () => {
+      console.log(`Server running on port ${PORT}`);
+    });
+  }
 }
 
 startServer();
+
+export default app;
