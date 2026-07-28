@@ -8,9 +8,9 @@ import { createServer as createViteServer } from 'vite';
 import { v2 as cloudinary } from 'cloudinary';
 
 cloudinary.config({
-  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-  api_key: process.env.CLOUDINARY_API_KEY,
-  api_secret: process.env.CLOUDINARY_API_SECRET
+  cloud_name: 'rotfrrrt',
+  api_key: '367347282362872',
+  api_secret: 'bJJlXy84e1Td-YRSxy7-Mhkm2n8'
 });
 
 const app = express();
@@ -105,7 +105,7 @@ app.post('/api/upload-complete', express.json(), async (req, res) => {
     let downloadUrl = null;
     
     // Upload to Cloudinary if configured
-    if (process.env.CLOUDINARY_CLOUD_NAME && process.env.CLOUDINARY_API_KEY && process.env.CLOUDINARY_API_SECRET) {
+    if (true) {
       console.log('Uploading to Cloudinary...');
       try {
         const result = await cloudinary.uploader.upload_large(finalPath, {

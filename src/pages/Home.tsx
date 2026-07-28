@@ -90,7 +90,7 @@ export default function Home() {
     setUploadProgress(0);
     setUploadError(null);
 
-    const chunkSize = 5 * 1024 * 1024; // 5MB chunks to bypass proxy limits
+    const chunkSize = 512 * 1024; // 512KB chunks to safely bypass Nginx proxy limits
     const totalChunks = Math.ceil(file.size / chunkSize);
     const uploadId = Date.now().toString() + '_' + Math.random().toString(36).substring(7);
 
