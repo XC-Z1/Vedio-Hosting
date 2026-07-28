@@ -4,18 +4,64 @@
  */
 
 import { BrowserRouter, Routes, Route, Link } from 'react-router-dom';
-import { MoreVertical, Info, User, X, FolderKanban, Trash2, Link as LinkIcon, FileVideo } from 'lucide-react';
-import { useState, useEffect } from 'react';
+import { MoreVertical, Info, User, X, FolderKanban, Trash2, Link as LinkIcon, FileVideo, Download, ArrowUpDown } from 'lucide-react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { formatDistanceToNow } from 'date-fns';
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import Home from './pages/Home';
 import VideoView from './pages/VideoView';
 import { VideoMeta } from './types';
+
+function VideoPreviewThumbnail({ video, onClick }: { video: VideoMeta; onClick?: () => void }) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const [isHovered, setIsHovered] = useState(false);
+  
+  useEffect(() => {
+    let timeout: NodeJS.Timeout;
+    if (isHovered && videoRef.current) {
+      videoRef.current.currentTime = 0;
+      videoRef.current.play().catch(() => {});
+      timeout = setTimeout(() => {
+        if (videoRef.current) {
+          videoRef.current.pause();
+          videoRef.current.currentTime = 0;
+        }
+      }, 3000);
+    } else if (videoRef.current) {
+      videoRef.current.pause();
+      videoRef.current.currentTime = 0;
+    }
+    return () => clearTimeout(timeout);
+  }, [isHovered]);
+
+  return (
+    <div 
+      className={`w-24 h-16 bg-[#111] border border-white/10 flex-shrink-0 flex items-center justify-center relative overflow-hidden group ${onClick ? 'cursor-pointer' : ''}`}
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
+      onClick={onClick}
+    >
+      <FileVideo className={`w-6 h-6 text-white/20 absolute z-10 transition-opacity duration-300 ${isHovered ? 'opacity-0' : 'opacity-100'}`} />
+      <video
+        ref={videoRef}
+        src={video.downloadUrl || `/uploads/${video.filename}`}
+        className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-300 ${isHovered ? 'opacity-100' : 'opacity-0'}`}
+        muted
+        playsInline
+        loop={false}
+      />
+    </div>
+  );
+}
 
 export default function App() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
   const [manageOpen, setManageOpen] = useState(false);
   const [userVideos, setUserVideos] = useState<VideoMeta[]>([]);
+  const [sortBy, setSortBy] = useState<'date' | 'views' | 'size'>('date');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
+  const [previewVideo, setPreviewVideo] = useState<VideoMeta | null>(null);
 
   useEffect(() => {
     if (manageOpen) {
@@ -71,6 +117,41 @@ export default function App() {
     setCopiedApp(id);
     setTimeout(() => setCopiedApp(null), 2000);
   };
+
+  const handleExportLibrary = () => {
+    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(userVideos, null, 2));
+    const downloadAnchorNode = document.createElement('a');
+    downloadAnchorNode.setAttribute("href", dataStr);
+    downloadAnchorNode.setAttribute("download", "video_library_metadata.json");
+    document.body.appendChild(downloadAnchorNode);
+    downloadAnchorNode.click();
+    downloadAnchorNode.remove();
+  };
+
+  const sortedVideos = useMemo(() => {
+    return [...userVideos].sort((a, b) => {
+      let comparison = 0;
+      if (sortBy === 'date') {
+        comparison = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+      } else if (sortBy === 'views') {
+        comparison = (a.viewCount || 0) - (b.viewCount || 0);
+      } else if (sortBy === 'size') {
+        comparison = a.size - b.size;
+      }
+      return sortOrder === 'asc' ? comparison : -comparison;
+    });
+  }, [userVideos, sortBy, sortOrder]);
+
+  const topVideos = useMemo(() => {
+    return [...userVideos]
+      .filter(v => (v.viewCount || 0) > 0)
+      .sort((a, b) => (b.viewCount || 0) - (a.viewCount || 0))
+      .slice(0, 5)
+      .map(v => ({
+        name: v.originalName.length > 15 ? v.originalName.substring(0, 15) + '...' : v.originalName,
+        views: v.viewCount || 0
+      }));
+  }, [userVideos]);
 
   return (
     <BrowserRouter>
@@ -164,22 +245,76 @@ export default function App() {
                 <X className="w-6 h-6" />
               </button>
               
-              <div className="shrink-0 mb-8">
-                <h2 className="text-3xl font-serif italic mb-2">Manage Library</h2>
-                <p className="text-[10px] uppercase tracking-widest text-white/40">Your uploaded assets ({userVideos.length})</p>
+              <div className="shrink-0 mb-8 flex justify-between items-start">
+                <div>
+                  <h2 className="text-3xl font-serif italic mb-2">Manage Library</h2>
+                  <p className="text-[10px] uppercase tracking-widest text-white/40">Your uploaded assets ({userVideos.length})</p>
+                </div>
+                {userVideos.length > 0 && (
+                  <button
+                    onClick={handleExportLibrary}
+                    className="flex items-center gap-2 px-4 py-2 border border-white/10 hover:border-white/30 text-white/60 hover:text-white transition-colors text-[10px] uppercase tracking-widest"
+                  >
+                    <Download className="w-3 h-3" /> Export JSON
+                  </button>
+                )}
               </div>
 
+              {topVideos.length > 0 && (
+                <div className="shrink-0 mb-8 border border-white/10 bg-white/5 p-4 sm:p-6">
+                  <h3 className="text-xs uppercase tracking-widest text-white/70 mb-4">Top Assets by Views</h3>
+                  <div className="h-40 w-full">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={topVideos} margin={{ top: 0, right: 0, left: -25, bottom: 0 }}>
+                        <XAxis dataKey="name" stroke="#ffffff40" fontSize={10} tickLine={false} axisLine={false} />
+                        <YAxis stroke="#ffffff40" fontSize={10} tickLine={false} axisLine={false} allowDecimals={false} />
+                        <Tooltip 
+                          cursor={{ fill: '#ffffff10' }}
+                          contentStyle={{ backgroundColor: '#0a0a0a', border: '1px solid #ffffff10', borderRadius: '0', fontSize: '12px' }}
+                          itemStyle={{ color: '#00FF88' }}
+                        />
+                        <Bar dataKey="views" fill="#00FF88" radius={[2, 2, 0, 0]} maxBarSize={40} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+              )}
+
+              {userVideos.length > 0 && (
+                <div className="shrink-0 mb-4 flex items-center justify-end gap-3">
+                  <div className="relative">
+                    <select
+                      value={sortBy}
+                      onChange={(e) => setSortBy(e.target.value as 'date' | 'views' | 'size')}
+                      className="appearance-none bg-[#111] border border-white/10 text-white/70 text-[10px] uppercase tracking-widest px-4 py-2 pr-8 hover:border-white/30 transition-colors outline-none cursor-pointer"
+                    >
+                      <option value="date">Date Uploaded</option>
+                      <option value="views">Most Viewed</option>
+                      <option value="size">Size</option>
+                    </select>
+                    <div className="absolute inset-y-0 right-0 flex items-center px-2 pointer-events-none text-white/40">
+                      <svg className="w-3 h-3 fill-current" viewBox="0 0 20 20"><path d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" /></svg>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc')}
+                    className="p-2 border border-white/10 hover:border-white/30 text-white/60 hover:text-white transition-colors flex items-center justify-center"
+                    title={sortOrder === 'asc' ? 'Ascending' : 'Descending'}
+                  >
+                    <ArrowUpDown className="w-4 h-4" />
+                  </button>
+                </div>
+              )}
+
               <div className="flex-1 overflow-y-auto pr-2 space-y-4">
-                {userVideos.length === 0 ? (
+                {sortedVideos.length === 0 ? (
                   <div className="p-12 border border-white/10 border-dashed text-center">
                     <p className="text-[10px] text-white/40 uppercase tracking-widest">No assets in library</p>
                   </div>
                 ) : (
-                  userVideos.map(video => (
+                  sortedVideos.map(video => (
                     <div key={video.id} className="flex flex-col sm:flex-row sm:items-center gap-4 p-4 border border-white/10 bg-white/5 hover:bg-white/10 transition-colors">
-                      <div className="w-24 h-16 bg-[#111] border border-white/10 flex-shrink-0 flex items-center justify-center">
-                        <FileVideo className="w-6 h-6 text-white/20" />
-                      </div>
+                      <VideoPreviewThumbnail video={video} onClick={() => setPreviewVideo(video)} />
                       <div className="flex-1 min-w-0">
                         <Link to={`/v/${video.id}`} onClick={() => setManageOpen(false)} className="block truncate font-medium hover:text-[#00FF88] transition-colors">
                           {video.originalName}
@@ -208,6 +343,30 @@ export default function App() {
                   ))
                 )}
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* Video Preview Overlay */}
+        {previewVideo && (
+          <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
+            <div 
+              className="absolute inset-0 bg-black/90 backdrop-blur-md animate-in fade-in duration-300" 
+              onClick={() => setPreviewVideo(null)}
+            ></div>
+            <div className="relative w-full max-w-5xl aspect-video bg-black border border-white/10 shadow-2xl animate-in zoom-in-95 duration-300">
+              <button 
+                onClick={() => setPreviewVideo(null)} 
+                className="absolute -top-12 right-0 text-white/60 hover:text-white transition-colors flex items-center gap-2 text-sm uppercase tracking-widest"
+              >
+                Close <X className="w-5 h-5" />
+              </button>
+              <video
+                src={previewVideo.downloadUrl || `/uploads/${previewVideo.filename}`}
+                controls
+                autoPlay
+                className="w-full h-full object-contain"
+              />
             </div>
           </div>
         )}

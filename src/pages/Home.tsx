@@ -101,7 +101,7 @@ export default function Home() {
         const chunk = file.slice(start, end);
 
         const formData = new FormData();
-        formData.append('chunk', chunk);
+        formData.append('chunk', chunk, 'chunk.bin');
         formData.append('uploadId', uploadId);
         formData.append('chunkIndex', chunkIndex.toString());
 
@@ -119,7 +119,7 @@ export default function Home() {
 
           xhr.onload = () => {
             if (xhr.status === 200) resolve(true);
-            else reject(new Error('Chunk upload failed'));
+            else reject(new Error(`Chunk upload failed: ${xhr.status} ${xhr.responseText}`));
           };
           xhr.onerror = () => reject(new Error('Network error occurred during upload.'));
           xhr.send(formData);

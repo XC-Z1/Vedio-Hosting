@@ -15,8 +15,9 @@ cloudinary.config({
 
 const app = express();
 const PORT = 3000;
-const UPLOADS_DIR = process.env.VERCEL ? path.join('/tmp', 'uploads') : path.join(process.cwd(), 'uploads');
-const DB_FILE = process.env.VERCEL ? path.join('/tmp', 'db.json') : path.join(process.cwd(), 'db.json');
+const isWorkspace = fs.existsSync('/workspace');
+const UPLOADS_DIR = process.env.VERCEL ? path.join('/tmp', 'uploads') : isWorkspace ? '/workspace/uploads' : path.join(process.cwd(), 'uploads');
+const DB_FILE = process.env.VERCEL ? path.join('/tmp', 'db.json') : isWorkspace ? '/workspace/db.json' : path.join(process.cwd(), 'db.json');
 
 // Ensure uploads directory exists
 if (!fs.existsSync(UPLOADS_DIR)) {
@@ -97,7 +98,7 @@ app.post('/api/upload-complete', express.json(), async (req, res) => {
       });
     }
     await new Promise((resolve, reject) => {
-      writeStream.on('finish', resolve);
+      writeStream.on('finish', () => resolve(null));
       writeStream.on('error', reject);
       writeStream.end();
     });
@@ -111,7 +112,7 @@ app.post('/api/upload-complete', express.json(), async (req, res) => {
         const result = await cloudinary.uploader.upload_large(finalPath, {
           resource_type: 'video',
           folder: 'video_uploads'
-        });
+        }) as any;
         downloadUrl = result.secure_url;
         // Delete the local temporary file
         fs.unlinkSync(finalPath);
