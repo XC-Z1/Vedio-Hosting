@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, SyntheticEvent } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { VideoMeta } from '../types';
 import { ArrowLeft, Loader2 } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { motion } from 'motion/react';
+import { formatDuration } from '../lib/utils';
 
 export default function VideoView() {
   const { id } = useParams<{ id: string }>();
@@ -11,7 +12,8 @@ export default function VideoView() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [copied, setCopied] = useState(false);
-  
+  const [duration, setDuration] = useState<number | undefined>(undefined);
+
   useEffect(() => {
     fetch(`/api/videos/${id}`)
       .then(res => {
@@ -20,6 +22,7 @@ export default function VideoView() {
       })
       .then(data => {
         setVideo(data);
+        if (data.duration) setDuration(data.duration);
         setLoading(false);
       })
       .catch(err => {
@@ -27,6 +30,13 @@ export default function VideoView() {
         setLoading(false);
       });
   }, [id]);
+
+  const handleLoadedMetadata = (e: SyntheticEvent<HTMLVideoElement, Event>) => {
+    const dur = e.currentTarget.duration;
+    if (dur && isFinite(dur) && dur > 0) {
+      setDuration(dur);
+    }
+  };
 
   const handleCopyLink = () => {
     navigator.clipboard.writeText(window.location.href);
@@ -141,6 +151,7 @@ export default function VideoView() {
             controls
             autoPlay
             src={video.downloadUrl || `/uploads/${video.filename}`}
+            onLoadedMetadata={handleLoadedMetadata}
           >
             Your browser does not support the video tag.
           </video>
@@ -150,7 +161,7 @@ export default function VideoView() {
           <div>
             <h2 className="text-4xl font-serif italic mb-2 break-all">{video.originalName}</h2>
             <p className="text-xs text-white/60 tracking-wider font-light">
-              Uploaded {formatDistanceToNow(new Date(video.createdAt))} ago • {(video.size / (1024 * 1024)).toFixed(2)} MB • {video.mimetype.split('/')[1]?.toUpperCase() || 'VIDEO'}
+              Uploaded {formatDistanceToNow(new Date(video.createdAt))} ago • {formatDuration(duration) ? `${formatDuration(duration)} • ` : ''}{(video.size / (1024 * 1024)).toFixed(2)} MB • {video.mimetype.split('/')[1]?.toUpperCase() || 'VIDEO'}
             </p>
           </div>
         </div>
@@ -178,6 +189,12 @@ export default function VideoView() {
             <p className="text-[10px] text-white/40 uppercase tracking-widest mb-1">ID</p>
             <p className="font-mono text-xs">{video.id}</p>
           </div>
+          {duration !== undefined && duration > 0 && (
+            <div>
+              <p className="text-[10px] text-white/40 uppercase tracking-widest mb-1">Duration</p>
+              <p className="font-mono text-xs">{formatDuration(duration)}</p>
+            </div>
+          )}
           <div>
             <p className="text-[10px] text-white/40 uppercase tracking-widest mb-1">Format</p>
             <p className="font-mono text-xs">{video.mimetype}</p>

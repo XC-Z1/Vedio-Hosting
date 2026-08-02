@@ -11,48 +11,8 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recha
 import Home from './pages/Home';
 import VideoView from './pages/VideoView';
 import { VideoMeta } from './types';
-
-function VideoPreviewThumbnail({ video, onClick }: { video: VideoMeta; onClick?: () => void }) {
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const [isHovered, setIsHovered] = useState(false);
-  
-  useEffect(() => {
-    let timeout: NodeJS.Timeout;
-    if (isHovered && videoRef.current) {
-      videoRef.current.currentTime = 0;
-      videoRef.current.play().catch(() => {});
-      timeout = setTimeout(() => {
-        if (videoRef.current) {
-          videoRef.current.pause();
-          videoRef.current.currentTime = 0;
-        }
-      }, 3000);
-    } else if (videoRef.current) {
-      videoRef.current.pause();
-      videoRef.current.currentTime = 0;
-    }
-    return () => clearTimeout(timeout);
-  }, [isHovered]);
-
-  return (
-    <div 
-      className={`w-24 h-16 bg-[#111] border border-white/10 flex-shrink-0 flex items-center justify-center relative overflow-hidden group ${onClick ? 'cursor-pointer' : ''}`}
-      onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => setIsHovered(false)}
-      onClick={onClick}
-    >
-      <FileVideo className={`w-6 h-6 text-white/20 absolute z-10 transition-opacity duration-300 ${isHovered ? 'opacity-0' : 'opacity-100'}`} />
-      <video
-        ref={videoRef}
-        src={video.downloadUrl || `/uploads/${video.filename}`}
-        className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-300 ${isHovered ? 'opacity-100' : 'opacity-0'}`}
-        muted
-        playsInline
-        loop={false}
-      />
-    </div>
-  );
-}
+import VideoPreviewThumbnail from './components/VideoPreviewThumbnail';
+import { formatDuration } from './lib/utils';
 
 export default function App() {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -62,6 +22,23 @@ export default function App() {
   const [sortBy, setSortBy] = useState<'date' | 'views' | 'size'>('date');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   const [previewVideo, setPreviewVideo] = useState<VideoMeta | null>(null);
+
+  const handleDurationLoaded = (id: string, duration: number) => {
+    setUserVideos(prev => {
+      let updated = false;
+      const next = prev.map(v => {
+        if (v.id === id && (!v.duration || Math.abs(v.duration - duration) > 0.1)) {
+          updated = true;
+          return { ...v, duration };
+        }
+        return v;
+      });
+      if (updated) {
+        localStorage.setItem('recent_videos', JSON.stringify(next));
+      }
+      return next;
+    });
+  };
 
   useEffect(() => {
     if (manageOpen) {
@@ -314,13 +291,17 @@ export default function App() {
                 ) : (
                   sortedVideos.map(video => (
                     <div key={video.id} className="flex flex-col sm:flex-row sm:items-center gap-4 p-4 border border-white/10 bg-white/5 hover:bg-white/10 transition-colors">
-                      <VideoPreviewThumbnail video={video} onClick={() => setPreviewVideo(video)} />
+                      <VideoPreviewThumbnail 
+                        video={video} 
+                        onClick={() => setPreviewVideo(video)} 
+                        onDurationLoaded={handleDurationLoaded}
+                      />
                       <div className="flex-1 min-w-0">
                         <Link to={`/v/${video.id}`} onClick={() => setManageOpen(false)} className="block truncate font-medium hover:text-[#00FF88] transition-colors">
                           {video.originalName}
                         </Link>
                         <p className="text-[10px] text-white/40 mt-1 uppercase tracking-wider">
-                          {formatDistanceToNow(new Date(video.createdAt))} ago • {(video.size / (1024 * 1024)).toFixed(1)} MB • {video.viewCount || 0} views
+                          {formatDistanceToNow(new Date(video.createdAt))} ago • {formatDuration(video.duration) ? `${formatDuration(video.duration)} • ` : ''}{(video.size / (1024 * 1024)).toFixed(1)} MB • {video.viewCount || 0} views
                         </p>
                       </div>
                       <div className="flex items-center gap-2 shrink-0 mt-4 sm:mt-0">

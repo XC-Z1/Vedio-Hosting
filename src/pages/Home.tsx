@@ -1,9 +1,11 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { UploadCloud, FileVideo, Video, Link as LinkIcon, Loader2 } from 'lucide-react';
-import { cn } from '../lib/utils';
+import { cn, formatDuration } from '../lib/utils';
 import { Link, useNavigate } from 'react-router-dom';
 import { formatDistanceToNow } from 'date-fns';
 import { VideoMeta } from '../types';
+import VideoPreviewThumbnail from '../components/VideoPreviewThumbnail';
+
 
 export default function Home() {
   const [isDragging, setIsDragging] = useState(false);
@@ -35,6 +37,23 @@ export default function Home() {
     window.addEventListener('videos_updated', handleVideosUpdated);
     return () => window.removeEventListener('videos_updated', handleVideosUpdated);
   }, []);
+
+  const handleDurationLoaded = (id: string, duration: number) => {
+    setRecentVideos(prev => {
+      let updated = false;
+      const next = prev.map(v => {
+        if (v.id === id && (!v.duration || Math.abs(v.duration - duration) > 0.1)) {
+          updated = true;
+          return { ...v, duration };
+        }
+        return v;
+      });
+      if (updated) {
+        localStorage.setItem('recent_videos', JSON.stringify(next));
+      }
+      return next;
+    });
+  };
 
   const addRecentVideo = (video: VideoMeta) => {
     const updated = [video, ...recentVideos].slice(0, 10);
@@ -242,12 +261,11 @@ export default function Home() {
             recentVideos.map((video) => (
               <div key={video.id} className="flex flex-col gap-2 group">
                 <div className="flex gap-4">
-                  <Link
-                    to={`/v/${video.id}`}
-                    className="w-24 h-16 bg-[#111] border border-white/5 flex-shrink-0 flex items-center justify-center group-hover:border-white/20 transition-colors"
-                  >
-                    <FileVideo className="w-6 h-6 text-white/20 group-hover:text-[#00FF88] transition-colors" />
-                  </Link>
+                  <VideoPreviewThumbnail
+                    video={video}
+                    onClick={() => navigate(`/v/${video.id}`)}
+                    onDurationLoaded={handleDurationLoaded}
+                  />
                   <div className="flex flex-col justify-center min-w-0 flex-1">
                     <Link to={`/v/${video.id}`} className="block w-full">
                       <p className="text-xs font-medium group-hover:text-[#00FF88] transition-colors truncate w-full" title={video.originalName}>
@@ -255,7 +273,7 @@ export default function Home() {
                       </p>
                     </Link>
                     <p className="text-[10px] text-white/40 mt-1 uppercase tracking-wider">
-                      {formatDistanceToNow(new Date(video.createdAt))} • {(video.size / (1024 * 1024)).toFixed(1)} MB
+                      {formatDistanceToNow(new Date(video.createdAt))} • {formatDuration(video.duration) ? `${formatDuration(video.duration)} • ` : ''}{(video.size / (1024 * 1024)).toFixed(1)} MB
                     </p>
                     <div className="flex items-center gap-3 mt-2 opacity-0 group-hover:opacity-100 transition-opacity">
                       <button 
