@@ -1,10 +1,12 @@
-import { useEffect, useState, SyntheticEvent } from 'react';
+import { useEffect, useState, useRef, SyntheticEvent } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { VideoMeta } from '../types';
-import { ArrowLeft, Loader2 } from 'lucide-react';
+import { ArrowLeft, Loader2, Copy, Check, Download, Eye, Film, Sparkles, HardDrive, Shield, Gauge } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { motion } from 'motion/react';
 import { formatDuration } from '../lib/utils';
+import { useTheme } from '../ThemeContext';
+import { useToast } from '../ToastContext';
 
 export default function VideoView() {
   const { id } = useParams<{ id: string }>();
@@ -13,8 +15,17 @@ export default function VideoView() {
   const [error, setError] = useState('');
   const [copied, setCopied] = useState(false);
   const [duration, setDuration] = useState<number | undefined>(undefined);
+  const [playbackSpeed, setPlaybackSpeed] = useState<number>(1);
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  const { theme, config } = useTheme();
+  const { toast } = useToast();
+
+  const viewCountedRef = useRef<string | null>(null);
 
   useEffect(() => {
+    if (!id) return;
+
     fetch(`/api/videos/${id}`)
       .then(res => {
         if (!res.ok) throw new Error('Video not found');
@@ -23,12 +34,49 @@ export default function VideoView() {
       .then(data => {
         setVideo(data);
         if (data.duration) setDuration(data.duration);
+        if (data.originalName) {
+          document.title = `${data.originalName} - StreamShare Pro`;
+        }
         setLoading(false);
+
+        // Increment view count strictly once per video ID on page load
+        if (viewCountedRef.current !== id) {
+          viewCountedRef.current = id;
+          fetch(`/api/videos/${id}/view`, { method: 'POST' })
+            .then(res => res.json())
+            .then(resData => {
+              if (resData && typeof resData.viewCount === 'number') {
+                setVideo(prev => prev ? { ...prev, viewCount: resData.viewCount } : prev);
+              }
+            })
+            .catch(() => {});
+        }
       })
       .catch(err => {
+        // Fallback to localStorage if API endpoint fails or is delayed
+        const saved = localStorage.getItem('recent_videos');
+        if (saved) {
+          try {
+            const parsed = JSON.parse(saved) as VideoMeta[];
+            const found = parsed.find(v => v.id === id);
+            if (found) {
+              setVideo(found);
+              if (found.duration) setDuration(found.duration);
+              if (found.originalName) {
+                document.title = `${found.originalName} - StreamShare Pro`;
+              }
+              setLoading(false);
+              return;
+            }
+          } catch (e) {}
+        }
         setError(err.message);
         setLoading(false);
       });
+
+    return () => {
+      document.title = 'StreamShare Pro - Fast & Secure Video Sharing';
+    };
   }, [id]);
 
   const handleLoadedMetadata = (e: SyntheticEvent<HTMLVideoElement, Event>) => {
@@ -36,45 +84,55 @@ export default function VideoView() {
     if (dur && isFinite(dur) && dur > 0) {
       setDuration(dur);
     }
+    if (videoRef.current) {
+      videoRef.current.playbackRate = playbackSpeed;
+    }
+  };
+
+  const handleSpeedChange = (speed: number) => {
+    setPlaybackSpeed(speed);
+    if (videoRef.current) {
+      videoRef.current.playbackRate = speed;
+    }
+    toast.info(`Playback speed set to ${speed}x`, 'Speed Adjusted');
   };
 
   const handleCopyLink = () => {
     navigator.clipboard.writeText(window.location.href);
     setCopied(true);
+    toast.success('Direct share URL copied to clipboard!', 'Link Copied');
     setTimeout(() => setCopied(false), 2000);
   };
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-full min-h-[50vh]">
-        <Loader2 className="w-8 h-8 animate-spin text-[#00FF88]" />
+      <div className="flex flex-col items-center justify-center h-full min-h-[60vh] gap-4">
+        <Loader2 className="w-10 h-10 animate-spin text-[#00FF88]" />
+        <p className="text-xs font-mono text-white/50 animate-pulse">Initializing Stream Engine...</p>
       </div>
     );
   }
 
   if (error || !video) {
     return (
-      <div className="max-w-lg mx-auto mt-20 text-center flex flex-col items-center justify-center">
+      <div className="max-w-lg mx-auto mt-16 text-center flex flex-col items-center justify-center p-8 bg-[#090d15] border border-white/10 rounded-3xl shadow-2xl">
         <motion.div 
           initial={{ scale: 0.8, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}
           transition={{ type: "spring", bounce: 0.5 }}
-          className="relative w-64 h-64 mb-8"
+          className="relative w-56 h-56 mb-6"
         >
           <motion.svg viewBox="0 0 200 200" fill="none" xmlns="http://www.w3.org/2000/svg" className="w-full h-full drop-shadow-2xl">
-            {/* Background shape */}
-            <rect x="30" y="40" width="140" height="110" rx="12" fill="#111" stroke="#333" strokeWidth="4" />
-            <path d="M40 150 L160 150" stroke="#333" strokeWidth="4" strokeLinecap="round" />
+            <rect x="30" y="40" width="140" height="110" rx="16" fill="#0d121d" stroke="rgba(255,255,255,0.15)" strokeWidth="3" />
+            <path d="M40 150 L160 150" stroke="rgba(255,255,255,0.15)" strokeWidth="3" strokeLinecap="round" />
             
-            {/* Broken film strip holes */}
             {[...Array(6)].map((_, i) => (
-              <rect key={`top-${i}`} x={40 + i * 20} y="48" width="10" height="8" rx="2" fill="#333" />
+              <rect key={`top-${i}`} x={40 + i * 20} y="48" width="10" height="8" rx="2" fill="rgba(255,255,255,0.2)" />
             ))}
             {[...Array(6)].map((_, i) => (
-              <rect key={`bottom-${i}`} x={40 + i * 20} y="134" width="10" height="8" rx="2" fill="#333" />
+              <rect key={`bottom-${i}`} x={40 + i * 20} y="134" width="10" height="8" rx="2" fill="rgba(255,255,255,0.2)" />
             ))}
 
-            {/* Sad Face */}
             <motion.path 
               d="M75 95 Q85 85 95 95" 
               stroke="#F5F5F5" strokeWidth="4" strokeLinecap="round" 
@@ -95,7 +153,6 @@ export default function VideoView() {
               transition={{ duration: 3, repeat: Infinity }}
             />
 
-            {/* Tear drop */}
             <motion.path 
               d="M120 105 Q125 115 120 120 Q115 115 120 105" 
               fill="#00FF88"
@@ -103,14 +160,12 @@ export default function VideoView() {
               transition={{ duration: 2, repeat: Infinity, delay: 0.5 }}
             />
             
-            {/* Crack in the film */}
-            <path d="M60 40 L80 80 L70 100 L90 150" stroke="#050505" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round" />
-            <path d="M60 40 L80 80 L70 100 L90 150" stroke="#333" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+            <path d="M60 40 L80 80 L70 100 L90 150" stroke="#05080e" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round" />
+            <path d="M60 40 L80 80 L70 100 L90 150" stroke="rgba(255,255,255,0.2)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
           </motion.svg>
           
-          {/* Floating 404 badges */}
           <motion.div 
-            className="absolute -top-4 -right-4 bg-[#00FF88] text-black font-mono font-bold px-4 py-2 rounded-full rotate-12 shadow-lg"
+            className="absolute -top-2 -right-2 bg-[#00FF88] text-black font-mono font-bold px-3 py-1 text-xs rounded-full rotate-12 shadow-lg"
             animate={{ rotate: [12, 16, 12] }}
             transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
           >
@@ -123,12 +178,12 @@ export default function VideoView() {
           animate={{ y: 0, opacity: 1 }}
           transition={{ delay: 0.2 }}
         >
-          <h2 className="text-3xl font-serif italic text-[#F5F5F5] mb-2">Asset Not Found</h2>
-          <p className="text-xs text-white/40 uppercase tracking-widest leading-relaxed">
-            The video has been permanently deleted<br/>or the link is broken.
+          <h2 className="text-2xl font-serif italic text-white mb-2">Asset Not Available</h2>
+          <p className="text-xs text-white/50 leading-relaxed font-light mb-6">
+            This media file has been removed or the share link has expired.
           </p>
-          <Link to="/" className="inline-block mt-8 border border-white/20 px-8 py-4 text-[10px] uppercase font-bold tracking-widest hover:bg-white hover:text-black transition-all">
-            Return to Dashboard
+          <Link to="/" className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-[#00FF88] text-black font-semibold text-xs transition-transform hover:scale-105 shadow-lg">
+            <ArrowLeft className="w-4 h-4" /> Return to Dashboard
           </Link>
         </motion.div>
       </div>
@@ -136,75 +191,147 @@ export default function VideoView() {
   }
 
   const shareUrl = window.location.href;
+  const downloadSrc = video.downloadUrl || `/uploads/${video.filename}`;
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-12 gap-8 h-full">
-      <div className="col-span-1 md:col-span-8 flex flex-col gap-6">
-        <Link to="/" className="inline-flex items-center space-x-2 text-[10px] uppercase tracking-widest text-white/40 hover:text-white transition-colors">
-          <ArrowLeft className="w-3 h-3" />
-          <span>Back to Library</span>
+    <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 h-full pb-10">
+      <div className="col-span-1 lg:col-span-8 flex flex-col gap-6">
+        
+        {/* Back Link */}
+        <Link to="/" className={`inline-flex items-center gap-2 text-xs font-mono ${config.textSecondary} hover:${config.accentColor} transition-colors group`}>
+          <ArrowLeft className="w-4 h-4 group-hover:-translate-x-1 transition-transform" />
+          <span>Back to Assets Dashboard</span>
         </Link>
 
-        <div className="relative aspect-video bg-[#111] group overflow-hidden border border-white/5">
+        {/* Cinema Video Container */}
+        <div className={`relative aspect-video ${theme === 'light' ? 'bg-slate-900' : 'bg-[#030508]'} rounded-3xl overflow-hidden border ${config.borderClass} shadow-2xl group`}>
+          <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent pointer-events-none z-10" />
           <video 
+            ref={videoRef}
             className="w-full h-full object-contain relative z-20"
             controls
             autoPlay
-            src={video.downloadUrl || `/uploads/${video.filename}`}
+            playsInline
+            src={`/uploads/${video.filename}`}
             onLoadedMetadata={handleLoadedMetadata}
+            onPlay={() => {
+              if (videoRef.current) {
+                videoRef.current.playbackRate = playbackSpeed;
+              }
+            }}
           >
             Your browser does not support the video tag.
           </video>
         </div>
 
-        <div className="flex items-end justify-between">
-          <div>
-            <h2 className="text-4xl font-serif italic mb-2 break-all">{video.originalName}</h2>
-            <p className="text-xs text-white/60 tracking-wider font-light">
-              Uploaded {formatDistanceToNow(new Date(video.createdAt))} ago • {formatDuration(duration) ? `${formatDuration(duration)} • ` : ''}{(video.size / (1024 * 1024)).toFixed(2)} MB • {video.mimetype.split('/')[1]?.toUpperCase() || 'VIDEO'}
-            </p>
+        {/* Playback Speed Controls Bar */}
+        <div className={`flex flex-wrap items-center justify-between gap-3 px-4 py-3 rounded-2xl border ${config.borderClass} ${config.cardBgClass} shadow-lg`}>
+          <div className="flex items-center gap-2">
+            <Gauge className={`w-4 h-4 ${config.accentColor}`} />
+            <span className={`text-xs font-semibold ${config.textPrimary}`}>Playback Speed</span>
+          </div>
+
+          <div className="flex items-center gap-1 sm:gap-1.5 p-1 rounded-xl bg-black/10 dark:bg-white/5 border border-white/10">
+            {[0.5, 1, 1.25, 1.5, 2].map((speed) => (
+              <button
+                key={speed}
+                onClick={() => handleSpeedChange(speed)}
+                className={`px-2.5 sm:px-3 py-1 rounded-lg text-xs font-mono font-medium transition-all duration-150 ${
+                  playbackSpeed === speed
+                    ? 'bg-amber-500 text-slate-950 font-bold shadow-md scale-105'
+                    : `${config.textSecondary} hover:${config.textPrimary} hover:bg-white/10`
+                }`}
+              >
+                {speed}x
+              </button>
+            ))}
           </div>
         </div>
 
-        <div className="bg-white/5 p-6 border border-white/10 flex flex-col sm:flex-row sm:items-center justify-between mt-4 gap-4">
-          <div className="min-w-0 flex-1 pr-4">
-            <p className="text-[10px] uppercase tracking-[0.2em] text-white/40 mb-1">Shareable Link</p>
-            <p className="font-mono text-sm text-[#00FF88] truncate">{shareUrl}</p>
+        {/* Title & Stats Bar */}
+        <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4 pt-2">
+          <div className="space-y-1 max-w-xl">
+            <div className={`inline-flex items-center gap-2 px-3 py-1 rounded-full ${config.badgeClass} text-[10px] font-mono`}>
+              <Film className="w-3 h-3" /> Uncompressed Source
+            </div>
+            <h2 className={`text-3xl sm:text-4xl font-serif italic ${config.textPrimary} break-all leading-tight`}>{video.originalName}</h2>
+            <p className={`text-xs ${config.textSecondary} font-mono pt-1`}>
+              Uploaded {formatDistanceToNow(new Date(video.createdAt))} ago • {(video.size / (1024 * 1024)).toFixed(2)} MB
+            </p>
+          </div>
+
+          <div className="flex items-center gap-3 shrink-0">
+            <a
+              href={downloadSrc}
+              download={video.originalName}
+              className={`inline-flex items-center gap-2 px-5 py-2.5 rounded-2xl ${config.buttonSecondary} border text-xs font-semibold transition-all shadow-md`}
+            >
+              <Download className={`w-4 h-4 ${config.accentColor}`} />
+              <span>Download</span>
+            </a>
+          </div>
+        </div>
+
+        {/* Share Link Banner Card */}
+        <div className={`${config.cardBgClass} p-5 sm:p-6 rounded-2xl border ${config.borderClass} flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-xl`}>
+          <div className="min-w-0 flex-1">
+            <p className={`text-[10px] font-mono uppercase tracking-widest ${config.textSecondary} mb-1`}>Direct Shareable Link</p>
+            <p className={`font-mono text-xs sm:text-sm ${config.accentColor} truncate ${theme === 'light' ? 'bg-slate-100 border-slate-200' : 'bg-black/40 border-white/10'} px-3 py-2 rounded-xl border`}>{shareUrl}</p>
           </div>
           <button
             onClick={handleCopyLink}
-            className="shrink-0 px-6 py-3 border border-white/20 hover:bg-white hover:text-black transition-colors text-[10px] uppercase font-bold tracking-widest"
+            className={`shrink-0 inline-flex items-center justify-center gap-2 px-6 py-3 rounded-2xl ${config.buttonPrimary} text-xs shadow-lg transition-all`}
           >
-            {copied ? 'Copied' : 'Copy Link'}
+            {copied ? (
+              <>
+                <Check className="w-4 h-4" /> Link Copied!
+              </>
+            ) : (
+              <>
+                <Copy className="w-4 h-4" /> Copy Link
+              </>
+            )}
           </button>
         </div>
       </div>
       
-      {/* Sidebar Placeholder for Video View */}
-      <div className="col-span-1 md:col-span-4 flex flex-col gap-4 border-l border-white/10 pl-8">
-        <h3 className="text-[10px] uppercase tracking-[0.3em] text-white/30 mb-4">Asset Details</h3>
+      {/* Sidebar Metadata Card */}
+      <div className={`col-span-1 lg:col-span-4 flex flex-col gap-4 lg:border-l ${config.borderClass} lg:pl-8`}>
+        <h3 className={`text-xs font-semibold uppercase tracking-widest ${config.textSecondary} mb-2`}>Asset Details</h3>
         
-        <div className="space-y-6">
-          <div>
-            <p className="text-[10px] text-white/40 uppercase tracking-widest mb-1">ID</p>
-            <p className="font-mono text-xs">{video.id}</p>
+        <div className={`p-6 rounded-2xl border ${config.borderClass} ${config.cardBgClass} space-y-5 shadow-xl`}>
+          <div className={`pb-4 border-b ${config.borderClass}`}>
+            <p className={`text-[10px] font-mono uppercase ${config.textSecondary} mb-1`}>Unique Asset ID</p>
+            <p className={`font-mono text-xs ${config.textPrimary} break-all select-all`}>{video.id}</p>
           </div>
+
           {duration !== undefined && duration > 0 && (
-            <div>
-              <p className="text-[10px] text-white/40 uppercase tracking-widest mb-1">Duration</p>
-              <p className="font-mono text-xs">{formatDuration(duration)}</p>
+            <div className={`pb-4 border-b ${config.borderClass}`}>
+              <p className={`text-[10px] font-mono uppercase ${config.textSecondary} mb-1`}>Runtime Duration</p>
+              <p className={`font-mono text-xs ${config.accentColor} font-bold`}>{formatDuration(duration)}</p>
             </div>
           )}
-          <div>
-            <p className="text-[10px] text-white/40 uppercase tracking-widest mb-1">Format</p>
-            <p className="font-mono text-xs">{video.mimetype}</p>
+
+          <div className={`pb-4 border-b ${config.borderClass}`}>
+            <p className={`text-[10px] font-mono uppercase ${config.textSecondary} mb-1`}>MIME Format</p>
+            <p className="font-mono text-xs text-cyan-400">{video.mimetype}</p>
           </div>
+
+          <div className={`pb-4 border-b ${config.borderClass}`}>
+            <p className={`text-[10px] font-mono uppercase ${config.textSecondary} mb-1`}>Views Count</p>
+            <div className="flex items-center gap-2 mt-0.5">
+              <Eye className={`w-4 h-4 ${config.textSecondary}`} />
+              <span className={`font-mono text-xs font-semibold ${config.textPrimary}`}>{video.viewCount || 1} Views</span>
+            </div>
+          </div>
+
           <div>
-            <p className="text-[10px] text-white/40 uppercase tracking-widest mb-1">System Name</p>
-            <p className="font-mono text-xs break-all">{video.filename}</p>
+            <p className={`text-[10px] font-mono uppercase ${config.textSecondary} mb-1`}>System Filename</p>
+            <p className={`font-mono text-xs ${config.textSecondary} break-all`}>{video.filename}</p>
           </div>
         </div>
       </div>
     </div>
   );
 }
+

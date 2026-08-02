@@ -1,8 +1,65 @@
 @import "tailwindcss";
-@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;1,400;1,600&family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;1,400;1,600&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
 
 @theme {
-  --font-sans: 'Inter', sans-serif;
+  --font-sans: 'Plus Jakarta Sans', sans-serif;
   --font-serif: 'Playfair Display', serif;
   --font-mono: 'JetBrains Mono', monospace;
 }
+
+@keyframes pulse-subtle {
+  0%, 100% { opacity: 0.4; transform: scale(1); }
+  50% { opacity: 0.8; transform: scale(1.02); }
+}
+
+@keyframes float-slow {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-8px); }
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.animate-pulse-subtle {
+  animation: pulse-subtle 4s ease-in-out infinite;
+}
+
+.animate-float {
+  animation: float-slow 6s ease-in-out infinite;
+}
+
+.shimmer-bg {
+  background: linear-gradient(90deg, rgba(255,255,255,0.03) 25%, rgba(255,255,255,0.08) 50%, rgba(255,255,255,0.03) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 2s infinite;
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #080b11;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #00FF88;
+}
+
+.glow-emerald {
+  box-shadow: 0 0 25px -5px rgba(0, 255, 136, 0.25);
+}
+
+.glow-emerald-lg {
+  box-shadow: 0 0 45px -10px rgba(0, 255, 136, 0.4);
+}
+

@@ -24,19 +24,35 @@ if (!fs.existsSync(UPLOADS_DIR)) {
   fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 }
 
-// Simple JSON database for metadata
+// Simple JSON database with in-memory caching for zero race conditions
+let dbCache: { videos: any[] } | null = null;
+
 const getDb = () => {
-  if (fs.existsSync(DB_FILE)) {
-    try {
-      return JSON.parse(fs.readFileSync(DB_FILE, 'utf-8'));
-    } catch (e) {
-      return { videos: [] };
+  if (!dbCache) {
+    if (fs.existsSync(DB_FILE)) {
+      try {
+        dbCache = JSON.parse(fs.readFileSync(DB_FILE, 'utf-8'));
+      } catch (e) {
+        dbCache = { videos: [] };
+      }
+    } else {
+      dbCache = { videos: [] };
     }
   }
-  return { videos: [] };
+  if (!dbCache || !Array.isArray(dbCache.videos)) {
+    dbCache = { videos: [] };
+  }
+  return dbCache;
 };
 
-const saveDb = (data: any) => fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2));
+const saveDb = (data: any) => {
+  dbCache = data;
+  try {
+    fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2));
+  } catch (e) {
+    console.error('Failed to save DB_FILE:', e);
+  }
+};
 
 // Multer setup for local file storage
 const storage = multer.diskStorage({
@@ -49,6 +65,58 @@ const storage = multer.diskStorage({
 const upload = multer({ storage, limits: { fileSize: 1024 * 1024 * 1024 } }); // 1GB max
 
 app.use(express.json());
+
+// Custom video streaming endpoint with HTTP 206 Range support for seamless browser playback
+app.get('/uploads/:filename', (req, res) => {
+  const filePath = path.join(UPLOADS_DIR, req.params.filename);
+  if (!fs.existsSync(filePath)) {
+    return res.status(404).send('File not found');
+  }
+
+  const stat = fs.statSync(filePath);
+  const fileSize = stat.size;
+  const range = req.headers.range;
+
+  const ext = path.extname(req.params.filename).toLowerCase();
+  let contentType = 'video/mp4';
+  if (ext === '.webm') contentType = 'video/webm';
+  if (ext === '.ogg' || ext === '.ogv') contentType = 'video/ogg';
+  if (ext === '.mov') contentType = 'video/quicktime';
+  if (ext === '.m4v') contentType = 'video/x-m4v';
+  if (ext === '.mkv') contentType = 'video/x-matroska';
+  if (ext === '.avi') contentType = 'video/x-msvideo';
+
+  if (range) {
+    const parts = range.replace(/bytes=/, "").split("-");
+    const start = parseInt(parts[0], 10);
+    const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+
+    if (start >= fileSize || end >= fileSize) {
+      res.status(416).setHeader('Content-Range', `bytes */${fileSize}`);
+      return res.end();
+    }
+
+    const chunksize = (end - start) + 1;
+    const file = fs.createReadStream(filePath, { start, end });
+    const head = {
+      'Content-Range': `bytes ${start}-${end}/${fileSize}`,
+      'Accept-Ranges': 'bytes',
+      'Content-Length': chunksize,
+      'Content-Type': contentType,
+    };
+    res.writeHead(206, head);
+    file.pipe(res);
+  } else {
+    const head = {
+      'Content-Length': fileSize,
+      'Content-Type': contentType,
+      'Accept-Ranges': 'bytes',
+    };
+    res.writeHead(200, head);
+    fs.createReadStream(filePath).pipe(res);
+  }
+});
+
 app.use('/uploads', express.static(UPLOADS_DIR));
 
 // API Routes
@@ -105,21 +173,18 @@ app.post('/api/upload-complete', express.json(), async (req, res) => {
     
     let downloadUrl = null;
     
-    // Upload to Cloudinary if configured
-    if (true) {
+    // Optional Cloudinary mirror upload
+    try {
       console.log('Uploading to Cloudinary...');
-      try {
-        const result = await cloudinary.uploader.upload_large(finalPath, {
-          resource_type: 'video',
-          folder: 'video_uploads'
-        }) as any;
+      const result = await cloudinary.uploader.upload_large(finalPath, {
+        resource_type: 'video',
+        folder: 'video_uploads'
+      }) as any;
+      if (result && result.secure_url) {
         downloadUrl = result.secure_url;
-        // Delete the local temporary file
-        fs.unlinkSync(finalPath);
-      } catch (error: any) {
-        fs.appendFileSync('cloudinary_error.log', JSON.stringify(error, null, 2) + '\\n');
-        console.error('Cloudinary upload error:', error);
       }
+    } catch (error: any) {
+      console.error('Cloudinary upload error (using local file fallback):', error);
     }
 
     const newVideo = {
@@ -143,6 +208,10 @@ app.post('/api/upload-complete', express.json(), async (req, res) => {
   }
 });
 
+function escapeHtml(str: string) {
+  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+}
+
 app.get('/api/videos/:id', (req, res) => {
   const db = getDb();
   const video = db.videos.find((v: any) => v.id === req.params.id);
@@ -150,11 +219,20 @@ app.get('/api/videos/:id', (req, res) => {
     return res.status(404).json({ error: 'Video not found' });
   }
   
-  // Increment view count
+  res.json(video);
+});
+
+app.post('/api/videos/:id/view', (req, res) => {
+  const db = getDb();
+  const video = db.videos.find((v: any) => v.id === req.params.id);
+  if (!video) {
+    return res.status(404).json({ error: 'Video not found' });
+  }
+
   video.viewCount = (video.viewCount || 0) + 1;
   saveDb(db);
-  
-  res.json(video);
+
+  res.json({ success: true, viewCount: video.viewCount });
 });
 
 app.delete('/api/videos/:id', (req, res) => {
@@ -179,14 +257,80 @@ app.delete('/api/videos/:id', (req, res) => {
   res.json({ success: true });
 });
 
+let viteInstance: any = null;
+
+// Dynamic Open Graph / Twitter card preview for shared video links
+app.get('/v/:id', async (req, res, next) => {
+  const db = getDb();
+  const video = db.videos.find((v: any) => v.id === req.params.id);
+
+  const host = req.get('host') || 'localhost:3000';
+  const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'https';
+  const fullUrl = `${protocol}://${host}/v/${req.params.id}`;
+
+  const videoTitle = video?.originalName ? video.originalName : 'Shared Video';
+  const title = `${videoTitle} - StreamShare Pro`;
+  const description = video 
+    ? `Watch "${video.originalName}" on StreamShare Pro. High performance video streaming.`
+    : 'Stream and share high-quality videos instantly with StreamShare Pro.';
+  const videoUrl = video ? `${protocol}://${host}/uploads/${video.filename}` : '';
+  const siteName = 'StreamShare Pro';
+
+  let htmlPath = path.join(process.cwd(), 'index.html');
+  if (process.env.NODE_ENV === 'production') {
+    htmlPath = path.join(process.cwd(), 'dist', 'index.html');
+  }
+
+  if (fs.existsSync(htmlPath)) {
+    try {
+      let html = fs.readFileSync(htmlPath, 'utf-8');
+
+      if (viteInstance && process.env.NODE_ENV !== 'production') {
+        html = await viteInstance.transformIndexHtml(req.originalUrl, html);
+      }
+
+      const metaTags = `
+    <title>${escapeHtml(title)}</title>
+    <meta name="title" content="${escapeHtml(title)}" />
+    <meta name="description" content="${escapeHtml(description)}" />
+
+    <!-- Open Graph / Facebook / WhatsApp / Telegram / Discord -->
+    <meta property="og:type" content="video.other" />
+    <meta property="og:site_name" content="${escapeHtml(siteName)}" />
+    <meta property="og:url" content="${escapeHtml(fullUrl)}" />
+    <meta property="og:title" content="${escapeHtml(title)}" />
+    <meta property="og:description" content="${escapeHtml(description)}" />
+    ${videoUrl ? `<meta property="og:video" content="${escapeHtml(videoUrl)}" />
+    <meta property="og:video:secure_url" content="${escapeHtml(videoUrl)}" />
+    <meta property="og:video:type" content="video/mp4" />` : ''}
+
+    <!-- Twitter -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:url" content="${escapeHtml(fullUrl)}" />
+    <meta name="twitter:title" content="${escapeHtml(title)}" />
+    <meta name="twitter:description" content="${escapeHtml(description)}" />
+      `;
+
+      html = html.replace(/<title>.*?<\/title>/i, '');
+      html = html.replace('</head>', `${metaTags}\n</head>`);
+
+      return res.status(200).set({ 'Content-Type': 'text/html' }).send(html);
+    } catch (e) {
+      console.error('Error rendering HTML meta tags:', e);
+      return next();
+    }
+  }
+  next();
+});
+
 // Vite Integration for full-stack React serving
 async function startServer() {
   if (process.env.NODE_ENV !== 'production') {
-    const vite = await createViteServer({
+    viteInstance = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
     });
-    app.use(vite.middlewares);
+    app.use(viteInstance.middlewares);
   } else {
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
