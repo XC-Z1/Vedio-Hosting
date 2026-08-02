@@ -142,18 +142,10 @@ export default function App() {
 
   return (
     <BrowserRouter>
-      <div className={`min-h-screen w-full ${config.bgClass} ${config.textPrimary} font-sans overflow-x-hidden transition-colors duration-500 flex flex-col relative`}>
+      <div className={`min-h-screen w-full ${config.bgClass} ${config.textPrimary} font-sans overflow-x-hidden transition-colors duration-300 flex flex-col relative`}>
         
-        {/* Background Ambient Lights */}
-        {theme !== 'light' && (
-          <>
-            <div className="fixed top-0 left-1/4 w-[500px] h-[300px] bg-[#00FF88]/5 rounded-full blur-[140px] pointer-events-none z-0" />
-            <div className="fixed bottom-0 right-1/4 w-[500px] h-[300px] bg-cyan-500/5 rounded-full blur-[140px] pointer-events-none z-0" />
-          </>
-        )}
-
         {/* Top Header Navigation */}
-        <header className={`h-20 shrink-0 border-b ${theme === 'light' ? 'border-slate-200' : 'border-white/10'} flex items-center justify-between px-6 md:px-12 sticky top-0 ${config.headerBgClass} backdrop-blur-md z-50 shadow-lg transition-colors`}>
+        <header className={`h-20 shrink-0 border-b ${theme === 'light' ? 'border-slate-200' : 'border-white/10'} flex items-center justify-between px-6 md:px-12 sticky top-0 ${config.headerBgClass} z-50 shadow-md transition-colors`}>
           <div className="flex items-center gap-6">
             <Link to="/" className="flex items-center gap-3 group">
               <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-[#00FF88] to-cyan-400 p-[1px] shadow-[0_0_20px_rgba(0,255,136,0.2)] group-hover:shadow-[0_0_30px_rgba(0,255,136,0.4)] transition-all duration-300">
@@ -188,18 +180,18 @@ export default function App() {
               className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-semibold transition-all duration-150 active:scale-95 ${
                 theme === 'light' 
                   ? 'bg-slate-100 border-slate-200 text-slate-800 hover:bg-slate-200/80 shadow-sm' 
-                  : 'bg-white/5 border-white/10 text-amber-300 hover:bg-white/10 hover:border-white/20'
+                  : 'bg-white/5 border-white/10 text-violet-300 hover:bg-white/10 hover:border-white/20'
               }`}
             >
               {theme === 'light' ? (
                 <>
-                  <Moon className="w-4 h-4 text-violet-600 shrink-0" />
-                  <span className="hidden sm:inline">Dark Mode</span>
+                  <Sun className="w-4 h-4 text-amber-500 shrink-0" />
+                  <span className="hidden sm:inline">Light Mode</span>
                 </>
               ) : (
                 <>
-                  <Sun className="w-4 h-4 text-amber-400 shrink-0" />
-                  <span className="hidden sm:inline">Light Mode</span>
+                  <Moon className="w-4 h-4 text-violet-400 shrink-0" />
+                  <span className="hidden sm:inline">Dark Mode</span>
                 </>
               )}
             </button>
@@ -237,11 +229,11 @@ export default function App() {
                     >
                       {theme === 'light' ? (
                         <>
-                          <Moon className="w-4 h-4 text-violet-500" /> Dark Mode
+                          <Sun className="w-4 h-4 text-amber-500" /> Light Mode
                         </>
                       ) : (
                         <>
-                          <Sun className="w-4 h-4 text-amber-400" /> Light Mode
+                          <Moon className="w-4 h-4 text-violet-400" /> Dark Mode
                         </>
                       )}
                     </button>

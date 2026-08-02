@@ -135,7 +135,7 @@ app.post('/api/upload-chunk', upload.single('chunk'), (req, res) => {
 });
 
 app.post('/api/upload-complete', express.json(), async (req, res) => {
-  const { uploadId, fileName, mimeType, size, totalChunks } = req.body;
+  const { uploadId, fileName, mimeType, size, totalChunks, title, tags } = req.body;
   
   if (!uploadId || !fileName || totalChunks === undefined) {
     return res.status(400).json({ error: 'Missing required data' });
@@ -187,13 +187,23 @@ app.post('/api/upload-complete', express.json(), async (req, res) => {
       console.error('Cloudinary upload error (using local file fallback):', error);
     }
 
+    const cleanTitle = (typeof title === 'string' && title.trim()) ? title.trim() : fileName;
+    
+    let processedTags: string[] = [];
+    if (Array.isArray(tags)) {
+      processedTags = tags.map((t: any) => String(t).trim()).filter(Boolean);
+    } else if (typeof tags === 'string') {
+      processedTags = tags.split(',').map(t => t.trim()).filter(Boolean);
+    }
+
     const newVideo = {
       id,
       filename: finalFileName,
-      originalName: fileName,
+      originalName: cleanTitle,
       mimetype: mimeType,
       size,
       downloadUrl,
+      tags: processedTags,
       createdAt: new Date().toISOString()
     };
 
@@ -233,6 +243,26 @@ app.post('/api/videos/:id/view', (req, res) => {
   saveDb(db);
 
   res.json({ success: true, viewCount: video.viewCount });
+});
+
+app.put('/api/videos/:id/tags', express.json(), (req, res) => {
+  const db = getDb();
+  const video = db.videos.find((v: any) => v.id === req.params.id);
+  if (!video) {
+    return res.status(404).json({ error: 'Video not found' });
+  }
+
+  const { tags } = req.body;
+  if (Array.isArray(tags)) {
+    video.tags = tags.map((t: any) => String(t).trim()).filter(Boolean);
+  } else if (typeof tags === 'string') {
+    video.tags = tags.split(',').map((t: string) => t.trim()).filter(Boolean);
+  } else {
+    video.tags = [];
+  }
+
+  saveDb(db);
+  res.json({ success: true, video });
 });
 
 app.delete('/api/videos/:id', (req, res) => {

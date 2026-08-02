@@ -8,4 +8,5 @@ export interface VideoMeta {
   downloadUrl?: string;
   viewCount?: number;
   duration?: number;
+  tags?: string[];
 }

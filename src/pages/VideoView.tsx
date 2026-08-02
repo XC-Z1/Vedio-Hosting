@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef, SyntheticEvent } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { VideoMeta } from '../types';
-import { ArrowLeft, Loader2, Copy, Check, Download, Eye, Film, Sparkles, HardDrive, Shield, Gauge } from 'lucide-react';
+import { ArrowLeft, Loader2, Copy, Check, Download, Eye, Film, Sparkles, HardDrive, Shield, Gauge, Tag, Plus, X } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { motion } from 'motion/react';
 import { formatDuration } from '../lib/utils';
@@ -16,6 +16,8 @@ export default function VideoView() {
   const [copied, setCopied] = useState(false);
   const [duration, setDuration] = useState<number | undefined>(undefined);
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(1);
+  const [newTagInput, setNewTagInput] = useState('');
+  const [isAddingTag, setIsAddingTag] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
 
   const { theme, config } = useTheme();
@@ -190,6 +192,72 @@ export default function VideoView() {
     );
   }
 
+  const handleAddTag = async () => {
+    if (!newTagInput.trim() || !video) return;
+    const clean = newTagInput.trim().toLowerCase().replace(/^#/, '');
+    const currentTags = video.tags || [];
+    if (currentTags.includes(clean)) {
+      setNewTagInput('');
+      setIsAddingTag(false);
+      return;
+    }
+
+    const updated = [...currentTags, clean];
+    setVideo(prev => prev ? { ...prev, tags: updated } : prev);
+    setNewTagInput('');
+    setIsAddingTag(false);
+
+    try {
+      await fetch(`/api/videos/${video.id}/tags`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tags: updated })
+      });
+      const saved = localStorage.getItem('recent_videos');
+      if (saved) {
+        try {
+          const list: VideoMeta[] = JSON.parse(saved);
+          const idx = list.findIndex(v => v.id === video.id);
+          if (idx !== -1) {
+            list[idx].tags = updated;
+            localStorage.setItem('recent_videos', JSON.stringify(list));
+          }
+        } catch (e) {}
+      }
+      toast.success(`Added tag "#${clean}"`, 'Tags Updated');
+    } catch (e) {
+      toast.error('Failed to update tags', 'Error');
+    }
+  };
+
+  const handleRemoveTag = async (tagToRemove: string) => {
+    if (!video) return;
+    const updated = (video.tags || []).filter(t => t !== tagToRemove);
+    setVideo(prev => prev ? { ...prev, tags: updated } : prev);
+
+    try {
+      await fetch(`/api/videos/${video.id}/tags`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tags: updated })
+      });
+      const saved = localStorage.getItem('recent_videos');
+      if (saved) {
+        try {
+          const list: VideoMeta[] = JSON.parse(saved);
+          const idx = list.findIndex(v => v.id === video.id);
+          if (idx !== -1) {
+            list[idx].tags = updated;
+            localStorage.setItem('recent_videos', JSON.stringify(list));
+          }
+        } catch (e) {}
+      }
+      toast.info(`Removed tag "#${tagToRemove}"`, 'Tags Updated');
+    } catch (e) {
+      toast.error('Failed to remove tag', 'Error');
+    }
+  };
+
   const shareUrl = window.location.href;
   const downloadSrc = video.downloadUrl || `/uploads/${video.filename}`;
 
@@ -250,14 +318,80 @@ export default function VideoView() {
 
         {/* Title & Stats Bar */}
         <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4 pt-2">
-          <div className="space-y-1 max-w-xl">
+          <div className="space-y-2 max-w-xl">
             <div className={`inline-flex items-center gap-2 px-3 py-1 rounded-full ${config.badgeClass} text-[10px] font-mono`}>
               <Film className="w-3 h-3" /> Uncompressed Source
             </div>
             <h2 className={`text-3xl sm:text-4xl font-serif italic ${config.textPrimary} break-all leading-tight`}>{video.originalName}</h2>
-            <p className={`text-xs ${config.textSecondary} font-mono pt-1`}>
+            <p className={`text-xs ${config.textSecondary} font-mono pt-0.5`}>
               Uploaded {formatDistanceToNow(new Date(video.createdAt))} ago • {(video.size / (1024 * 1024)).toFixed(2)} MB
             </p>
+
+            {/* Tags Banner */}
+            <div className="flex flex-wrap items-center gap-1.5 pt-1">
+              {video.tags && video.tags.length > 0 ? (
+                video.tags.map((tag, idx) => (
+                  <span
+                    key={idx}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-mono bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                  >
+                    #{tag}
+                    <button
+                      onClick={() => handleRemoveTag(tag)}
+                      className="hover:text-rose-400 transition-colors ml-0.5"
+                      title="Remove tag"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </span>
+                ))
+              ) : (
+                <span className={`text-xs font-mono ${config.textSecondary} italic`}>No tags assigned</span>
+              )}
+
+              {isAddingTag ? (
+                <div className="inline-flex items-center gap-1">
+                  <input
+                    type="text"
+                    value={newTagInput}
+                    onChange={(e) => setNewTagInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleAddTag();
+                      } else if (e.key === 'Escape') {
+                        setIsAddingTag(false);
+                      }
+                    }}
+                    placeholder="New tag..."
+                    autoFocus
+                    className={`px-2.5 py-1 text-xs font-mono border rounded-lg ${
+                      theme === 'light' ? 'bg-white text-slate-900 border-slate-300' : 'bg-black/40 text-white border-white/20'
+                    } focus:outline-none focus:border-emerald-500 w-24`}
+                  />
+                  <button
+                    onClick={handleAddTag}
+                    className="p-1 text-emerald-400 hover:text-emerald-300"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    onClick={() => setIsAddingTag(false)}
+                    className="p-1 text-slate-400 hover:text-white"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setIsAddingTag(true)}
+                  className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-mono ${config.textSecondary} hover:${config.accentColor} hover:bg-white/5 border border-transparent hover:border-white/10 transition-colors`}
+                >
+                  <Tag className="w-3 h-3" />
+                  <span>+ Add Tag</span>
+                </button>
+              )}
+            </div>
           </div>
 
           <div className="flex items-center gap-3 shrink-0">
