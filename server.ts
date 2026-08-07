@@ -221,7 +221,7 @@ app.post('/api/upload-direct', (req, res) => {
 
     try {
       const videoFile = req.file;
-      const { title, tags } = req.body;
+      const { title, tags, thumbnailUrl } = req.body;
 
       if (!videoFile) {
         return res.status(400).json({ error: 'No video file provided' });
@@ -280,7 +280,8 @@ app.post('/api/upload-direct', (req, res) => {
         title: cleanTitle,
         tags: parsedTags,
         viewCount: 0,
-        dataUrl
+        dataUrl,
+        thumbnailUrl: typeof thumbnailUrl === 'string' && thumbnailUrl.startsWith('data:') ? thumbnailUrl : undefined
       };
 
       db.videos.unshift(newVideo);
@@ -295,7 +296,7 @@ app.post('/api/upload-direct', (req, res) => {
 });
 
 app.post('/api/upload-complete', async (req, res) => {
-  const { uploadId, fileName, mimeType, size, totalChunks, title, tags } = req.body;
+  const { uploadId, fileName, mimeType, size, totalChunks, title, tags, thumbnailUrl } = req.body;
   
   if (!uploadId || !fileName || totalChunks === undefined) {
     return res.status(400).json({ error: 'Missing required upload parameters' });
@@ -372,7 +373,8 @@ app.post('/api/upload-complete', async (req, res) => {
       tags: processedTags,
       createdAt: new Date().toISOString(),
       viewCount: 0,
-      dataUrl
+      dataUrl,
+      thumbnailUrl: typeof thumbnailUrl === 'string' && thumbnailUrl.startsWith('data:') ? thumbnailUrl : undefined
     };
 
     const db = getDb();

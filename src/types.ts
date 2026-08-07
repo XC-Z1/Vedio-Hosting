@@ -10,4 +10,5 @@ export interface VideoMeta {
   duration?: number;
   tags?: string[];
   dataUrl?: string;
+  thumbnailUrl?: string;
 }

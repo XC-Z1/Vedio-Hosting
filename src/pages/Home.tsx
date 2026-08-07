@@ -9,6 +9,8 @@ import VideoPreviewThumbnail from '../components/VideoPreviewThumbnail';
 import { useTheme, themes, ThemeMode } from '../ThemeContext';
 import { useToast } from '../ToastContext';
 
+import { generateVideoThumbnail } from '../lib/thumbnail';
+
 export default function Home() {
   const [isDragging, setIsDragging] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
@@ -162,6 +164,17 @@ export default function Home() {
     setUploadProgress(0);
     setUploadError(null);
 
+    // Pre-generate video thumbnail image from canvas
+    let clientThumbnailUrl: string | undefined = undefined;
+    try {
+      const thumbRes = await generateVideoThumbnail(file, 0.5);
+      if (thumbRes?.thumbnailUrl) {
+        clientThumbnailUrl = thumbRes.thumbnailUrl;
+      }
+    } catch (e) {
+      console.warn('Pre-upload thumbnail capture warning:', e);
+    }
+
     // Direct single-pass upload function for fallback
     const performDirectUpload = async () => {
       return new Promise<void>((resolve, reject) => {
@@ -170,6 +183,9 @@ export default function Home() {
         formData.append('video', file, file.name);
         formData.append('title', titleToSend || customVideoTitle || file.name);
         formData.append('tags', JSON.stringify(tagsToSend || stagedTags));
+        if (clientThumbnailUrl) {
+          formData.append('thumbnailUrl', clientThumbnailUrl);
+        }
 
         const xhr = new XMLHttpRequest();
         xhr.open('POST', '/api/upload-direct');
@@ -294,7 +310,8 @@ export default function Home() {
           size: file.size,
           totalChunks,
           title: titleToSend || customVideoTitle || file.name,
-          tags: tagsToSend || stagedTags
+          tags: tagsToSend || stagedTags,
+          thumbnailUrl: clientThumbnailUrl
         })
       });
 
@@ -334,7 +351,8 @@ export default function Home() {
               createdAt: new Date().toISOString(),
               tags: tagsToSend || stagedTags,
               viewCount: 1,
-              dataUrl
+              dataUrl,
+              thumbnailUrl: clientThumbnailUrl
             };
             addRecentVideo(fallbackVid);
             setIsUploading(false);
