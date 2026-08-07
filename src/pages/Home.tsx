@@ -163,30 +163,57 @@ export default function Home() {
         const end = Math.min(start + chunkSize, file.size);
         const chunk = file.slice(start, end);
 
-        const formData = new FormData();
-        formData.append('chunk', chunk, 'chunk.bin');
-        formData.append('uploadId', uploadId);
-        formData.append('chunkIndex', chunkIndex.toString());
+        let attempts = 0;
+        let chunkSuccess = false;
+        let lastError = '';
 
-        await new Promise((resolve, reject) => {
-          const xhr = new XMLHttpRequest();
-          xhr.open('POST', '/api/upload-chunk');
-          
-          xhr.upload.onprogress = (e) => {
-            if (e.lengthComputable) {
-              const chunkProgress = e.loaded / e.total;
-              const overallProgress = Math.round(((chunkIndex + chunkProgress) / totalChunks) * 100);
-              setUploadProgress(overallProgress);
+        while (attempts < 3 && !chunkSuccess) {
+          attempts++;
+          try {
+            await new Promise((resolve, reject) => {
+              const formData = new FormData();
+              formData.append('chunk', chunk, 'chunk.bin');
+              formData.append('uploadId', uploadId);
+              formData.append('chunkIndex', chunkIndex.toString());
+
+              const xhr = new XMLHttpRequest();
+              xhr.open('POST', '/api/upload-chunk');
+              
+              xhr.upload.onprogress = (e) => {
+                if (e.lengthComputable) {
+                  const chunkProgress = e.loaded / e.total;
+                  const overallProgress = Math.round(((chunkIndex + chunkProgress) / totalChunks) * 100);
+                  setUploadProgress(overallProgress);
+                }
+              };
+
+              xhr.onload = () => {
+                if (xhr.status === 200) {
+                  resolve(true);
+                } else {
+                  let msg = `Status ${xhr.status}`;
+                  try {
+                    const parsed = JSON.parse(xhr.responseText);
+                    if (parsed.error) msg = parsed.error;
+                  } catch (e) {}
+                  reject(new Error(msg));
+                }
+              };
+              xhr.onerror = () => reject(new Error('Network connectivity issue.'));
+              xhr.send(formData);
+            });
+            chunkSuccess = true;
+          } catch (err: any) {
+            lastError = err?.message || 'Upload error';
+            if (attempts < 3) {
+              await new Promise(r => setTimeout(r, 800)); // wait 800ms before retrying chunk
             }
-          };
+          }
+        }
 
-          xhr.onload = () => {
-            if (xhr.status === 200) resolve(true);
-            else reject(new Error(`Chunk upload failed with status ${xhr.status}`));
-          };
-          xhr.onerror = () => reject(new Error('Network error occurred during chunk transfer.'));
-          xhr.send(formData);
-        });
+        if (!chunkSuccess) {
+          throw new Error(`Chunk ${chunkIndex + 1}/${totalChunks} failed: ${lastError}`);
+        }
       }
 
       const completeRes = await fetch('/api/upload-complete', {
@@ -195,7 +222,7 @@ export default function Home() {
         body: JSON.stringify({
           uploadId,
           fileName: file.name,
-          mimeType: file.type,
+          mimeType: file.type || 'video/mp4',
           size: file.size,
           totalChunks,
           title: titleToSend || customVideoTitle || file.name,
@@ -203,9 +230,11 @@ export default function Home() {
         })
       });
 
-      if (!completeRes.ok) throw new Error('Failed to assemble video chunks on server.');
-
       const resData = await completeRes.json();
+      if (!completeRes.ok || !resData.success) {
+        throw new Error(resData.error || 'Failed to assemble video chunks on server.');
+      }
+
       if (resData.video) {
         setIsUploading(false);
         setStagedFile(null);

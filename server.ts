@@ -57,7 +57,20 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage, limits: { fileSize: 100 * 1024 * 1024 } }); // 100MB max
 
-app.use(express.json());
+// CORS middleware to allow Chrome and cross-origin requests
+app.use((req, res, next) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Range, X-Requested-With');
+  res.setHeader('Access-Control-Expose-Headers', 'Content-Range, Content-Length, Accept-Ranges');
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(200);
+  }
+  next();
+});
+
+app.use(express.json({ limit: '100mb' }));
+app.use(express.urlencoded({ limit: '100mb', extended: true }));
 
 // Custom video streaming endpoint with HTTP 206 Range support for seamless browser playback
 app.get('/uploads/:filename', (req, res) => {
@@ -113,21 +126,35 @@ app.get('/uploads/:filename', (req, res) => {
 app.use('/uploads', express.static(UPLOADS_DIR));
 
 // API Routes
-app.post('/api/upload-chunk', upload.single('chunk'), (req, res) => {
-  const { uploadId, chunkIndex } = req.body;
-  const chunkFile = req.file;
+app.post('/api/upload-chunk', (req, res) => {
+  upload.single('chunk')(req, res, (err) => {
+    if (err) {
+      console.error('Multer error:', err);
+      return res.status(400).json({ error: err.message || 'Chunk upload failed' });
+    }
 
-  if (!chunkFile || !uploadId || chunkIndex === undefined) {
-    return res.status(400).json({ error: 'Missing chunk data' });
-  }
+    const { uploadId, chunkIndex } = req.body;
+    const chunkFile = req.file;
 
-  const chunkPath = path.join(UPLOADS_DIR, `${uploadId}_${chunkIndex}`);
-  fs.renameSync(chunkFile.path, chunkPath);
+    if (!chunkFile || !uploadId || chunkIndex === undefined) {
+      return res.status(400).json({ error: 'Missing chunk data' });
+    }
 
-  res.json({ success: true });
+    try {
+      const chunkPath = path.join(UPLOADS_DIR, `${uploadId}_${chunkIndex}`);
+      if (fs.existsSync(chunkPath)) {
+        try { fs.unlinkSync(chunkPath); } catch (e) {}
+      }
+      fs.renameSync(chunkFile.path, chunkPath);
+      res.json({ success: true });
+    } catch (e: any) {
+      console.error('Rename error:', e);
+      res.status(500).json({ error: e?.message || 'Failed to save chunk' });
+    }
+  });
 });
 
-app.post('/api/upload-complete', express.json(), async (req, res) => {
+app.post('/api/upload-complete', async (req, res) => {
   const { uploadId, fileName, mimeType, size, totalChunks, title, tags } = req.body;
   
   if (!uploadId || !fileName || totalChunks === undefined) {
@@ -143,30 +170,22 @@ app.post('/api/upload-complete', express.json(), async (req, res) => {
   const finalFileName = `${id}${ext}`;
   const finalPath = path.join(UPLOADS_DIR, finalFileName);
 
-  const writeStream = fs.createWriteStream(finalPath);
-
   try {
+    if (fs.existsSync(finalPath)) {
+      try { fs.unlinkSync(finalPath); } catch (e) {}
+    }
+
     for (let i = 0; i < totalChunks; i++) {
       const chunkPath = path.join(UPLOADS_DIR, `${uploadId}_${i}`);
       if (!fs.existsSync(chunkPath)) {
         throw new Error(`Missing chunk ${i}`);
       }
-      
-      await new Promise((resolve, reject) => {
-        const readStream = fs.createReadStream(chunkPath);
-        readStream.pipe(writeStream, { end: false });
-        readStream.on('end', () => {
-          fs.unlinkSync(chunkPath);
-          resolve(null);
-        });
-        readStream.on('error', reject);
-      });
+      const chunkData = fs.readFileSync(chunkPath);
+      fs.appendFileSync(finalPath, chunkData);
+      try {
+        fs.unlinkSync(chunkPath);
+      } catch (e) {}
     }
-    await new Promise((resolve, reject) => {
-      writeStream.on('finish', () => resolve(null));
-      writeStream.on('error', reject);
-      writeStream.end();
-    });
 
     const cleanTitle = (typeof title === 'string' && title.trim()) ? title.trim() : fileName;
     
@@ -193,9 +212,9 @@ app.post('/api/upload-complete', express.json(), async (req, res) => {
     saveDb(db);
 
     res.json({ success: true, video: newVideo });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Failed to merge chunks' });
+  } catch (err: any) {
+    console.error('Chunk assemble error:', err);
+    res.status(500).json({ error: err?.message || 'Failed to assemble video chunks' });
   }
 });
 
