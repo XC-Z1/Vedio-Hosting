@@ -51,24 +51,40 @@ export default function Home() {
         const res = await fetch('/api/videos');
         if (res.ok) {
           const data = await res.json();
-          if (Array.isArray(data) && data.length > 0) {
-            setRecentVideos(prev => {
-              const map = new Map<string, VideoMeta>();
-              prev.forEach(v => map.set(v.id, v));
-              data.forEach((srv: VideoMeta) => {
-                const existing = map.get(srv.id);
-                map.set(srv.id, {
-                  ...srv,
-                  thumbnailUrl: srv.thumbnailUrl || existing?.thumbnailUrl,
-                  dataUrl: srv.dataUrl || existing?.dataUrl,
-                  duration: srv.duration || existing?.duration
-                });
-              });
-              const merged = Array.from(map.values());
-              localStorage.setItem('recent_videos', JSON.stringify(merged));
-              return merged;
-            });
+          const serverVideos: VideoMeta[] = Array.isArray(data) ? data : [];
+          const serverIds = new Set(serverVideos.map(v => v.id));
+
+          // Read existing local videos
+          let localVideos: VideoMeta[] = [];
+          if (saved) {
+            try { localVideos = JSON.parse(saved); } catch (e) {}
           }
+
+          // Register any local videos missing from server DB
+          localVideos.forEach(localVid => {
+            if (!serverIds.has(localVid.id)) {
+              fetch('/api/videos/register', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(localVid)
+              }).catch(() => {});
+            }
+          });
+
+          const map = new Map<string, VideoMeta>();
+          localVideos.forEach(v => map.set(v.id, v));
+          serverVideos.forEach((srv: VideoMeta) => {
+            const existing = map.get(srv.id);
+            map.set(srv.id, {
+              ...srv,
+              thumbnailUrl: srv.thumbnailUrl || existing?.thumbnailUrl,
+              dataUrl: srv.dataUrl || existing?.dataUrl,
+              duration: srv.duration || existing?.duration
+            });
+          });
+          const merged = Array.from(map.values());
+          setRecentVideos(merged);
+          localStorage.setItem('recent_videos', JSON.stringify(merged));
         }
       } catch (e) { }
     };
@@ -397,6 +413,14 @@ export default function Home() {
               thumbnailUrl: clientThumbnailUrl
             };
             addRecentVideo(fallbackVid);
+
+            // Register fallbackVid with server DB so share links work on all devices
+            fetch('/api/videos/register', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(fallbackVid)
+            }).catch(e => console.warn('Sync fallback video warning:', e));
+
             setIsUploading(false);
             setStagedFile(null);
             setStagedTags([]);

@@ -117,8 +117,26 @@ app.use(express.urlencoded({ limit: '100mb', extended: true }));
 
 // Custom video streaming endpoint with HTTP 206 Range support for seamless browser playback
 app.get('/uploads/:filename', (req, res) => {
-  const filePath = path.join(UPLOADS_DIR, req.params.filename);
+  const paramName = req.params.filename;
+  const filePath = path.join(UPLOADS_DIR, paramName);
+  
   if (!fs.existsSync(filePath)) {
+    // Check if video exists in DB with dataUrl
+    const db = getDb();
+    const video = db.videos.find((v: any) => v.filename === paramName || v.id === paramName || (v.filename && v.filename.startsWith(paramName)));
+    if (video && video.dataUrl) {
+      try {
+        const matches = video.dataUrl.match(/^data:(.+);base64,(.+)$/);
+        if (matches) {
+          const mime = matches[1];
+          const buffer = Buffer.from(matches[2], 'base64');
+          res.setHeader('Content-Type', mime || 'video/mp4');
+          res.setHeader('Content-Length', buffer.length);
+          res.setHeader('Accept-Ranges', 'bytes');
+          return res.send(buffer);
+        }
+      } catch (e) {}
+    }
     return res.status(404).send('File not found');
   }
 
@@ -392,9 +410,85 @@ function escapeHtml(str: string) {
   return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
 }
 
+app.get('/api/videos', (req, res) => {
+  const db = getDb();
+  res.json(db.videos || []);
+});
+
+app.post('/api/videos/register', express.json({ limit: '100mb' }), (req, res) => {
+  try {
+    const { id, filename, originalName, mimetype, size, downloadUrl, tags, createdAt, viewCount, dataUrl, thumbnailUrl } = req.body;
+    if (!id) {
+      return res.status(400).json({ error: 'Missing video ID' });
+    }
+
+    const db = getDb();
+    const existingIndex = db.videos.findIndex((v: any) => v.id === id);
+    const videoObj = {
+      id,
+      filename: filename || `${id}.mp4`,
+      originalName: originalName || 'Video Asset',
+      mimetype: mimetype || 'video/mp4',
+      size: size || 0,
+      downloadUrl: downloadUrl || `/uploads/${filename || id + '.mp4'}`,
+      tags: Array.isArray(tags) ? tags : [],
+      createdAt: createdAt || new Date().toISOString(),
+      viewCount: viewCount || 0,
+      dataUrl,
+      thumbnailUrl
+    };
+
+    if (existingIndex >= 0) {
+      db.videos[existingIndex] = { ...db.videos[existingIndex], ...videoObj };
+    } else {
+      db.videos.unshift(videoObj);
+    }
+    saveDb(db);
+    res.json({ success: true, video: videoObj });
+  } catch (err: any) {
+    console.error('Failed to register video:', err);
+    res.status(500).json({ error: 'Failed to register video metadata' });
+  }
+});
+
 app.get('/api/videos/:id', (req, res) => {
   const db = getDb();
-  const video = db.videos.find((v: any) => v.id === req.params.id);
+  const searchId = req.params.id;
+  
+  // Search by exact id, exact filename, or filename starting with id
+  let video = db.videos.find((v: any) => 
+    v.id === searchId || 
+    v.filename === searchId || 
+    (v.filename && v.filename.startsWith(searchId))
+  );
+
+  if (!video) {
+    // Check if there is an actual physical file in UPLOADS_DIR matching this ID
+    try {
+      if (fs.existsSync(UPLOADS_DIR)) {
+        const files = fs.readdirSync(UPLOADS_DIR);
+        const match = files.find(f => f.includes(searchId));
+        if (match) {
+          const filePath = path.join(UPLOADS_DIR, match);
+          const stat = fs.statSync(filePath);
+          video = {
+            id: searchId,
+            filename: match,
+            originalName: match,
+            mimetype: 'video/mp4',
+            size: stat.size,
+            downloadUrl: `/uploads/${match}`,
+            tags: [],
+            createdAt: stat.birthtime.toISOString(),
+            viewCount: 1
+          };
+          db.videos.unshift(video);
+          saveDb(db);
+        }
+      }
+    } catch (e) {}
+  }
+
   if (!video) {
     return res.status(404).json({ error: 'Video not found' });
   }
