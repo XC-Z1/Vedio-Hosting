@@ -5,13 +5,6 @@ import multer from 'multer';
 import fs from 'fs';
 import { v4 as uuidv4 } from 'uuid';
 import { createServer as createViteServer } from 'vite';
-import { v2 as cloudinary } from 'cloudinary';
-
-cloudinary.config({
-  cloud_name: 'rotfrrrt',
-  api_key: '367347282362872',
-  api_secret: 'bJJlXy84e1Td-YRSxy7-Mhkm2n8'
-});
 
 const app = express();
 const PORT = 3000;
@@ -62,7 +55,7 @@ const storage = multer.diskStorage({
     cb(null, uniqueSuffix + path.extname(file.originalname));
   }
 });
-const upload = multer({ storage, limits: { fileSize: 1024 * 1024 * 1024 } }); // 1GB max
+const upload = multer({ storage, limits: { fileSize: 100 * 1024 * 1024 } }); // 100MB max
 
 app.use(express.json());
 
@@ -141,6 +134,10 @@ app.post('/api/upload-complete', express.json(), async (req, res) => {
     return res.status(400).json({ error: 'Missing required data' });
   }
 
+  if (size && size > 100 * 1024 * 1024) {
+    return res.status(400).json({ error: 'File size exceeds the 100MB maximum limit.' });
+  }
+
   const id = uuidv4();
   const ext = path.extname(fileName) || '.mp4';
   const finalFileName = `${id}${ext}`;
@@ -170,22 +167,6 @@ app.post('/api/upload-complete', express.json(), async (req, res) => {
       writeStream.on('error', reject);
       writeStream.end();
     });
-    
-    let downloadUrl = null;
-    
-    // Optional Cloudinary mirror upload
-    try {
-      console.log('Uploading to Cloudinary...');
-      const result = await cloudinary.uploader.upload_large(finalPath, {
-        resource_type: 'video',
-        folder: 'video_uploads'
-      }) as any;
-      if (result && result.secure_url) {
-        downloadUrl = result.secure_url;
-      }
-    } catch (error: any) {
-      console.error('Cloudinary upload error (using local file fallback):', error);
-    }
 
     const cleanTitle = (typeof title === 'string' && title.trim()) ? title.trim() : fileName;
     
@@ -202,7 +183,7 @@ app.post('/api/upload-complete', express.json(), async (req, res) => {
       originalName: cleanTitle,
       mimetype: mimeType,
       size,
-      downloadUrl,
+      downloadUrl: `/uploads/${finalFileName}`,
       tags: processedTags,
       createdAt: new Date().toISOString()
     };

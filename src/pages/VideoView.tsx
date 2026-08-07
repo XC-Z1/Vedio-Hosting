@@ -1,12 +1,13 @@
 import { useEffect, useState, useRef, SyntheticEvent } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { VideoMeta } from '../types';
-import { ArrowLeft, Loader2, Copy, Check, Download, Eye, Film, Sparkles, HardDrive, Shield, Gauge, Tag, Plus, X } from 'lucide-react';
+import { ArrowLeft, Loader2, Copy, Check, Download, Eye, Film, Sparkles, HardDrive, Shield, Gauge, Tag, Plus, X, Maximize, Maximize2, Minimize2, QrCode, Code, Share2, SkipBack, SkipForward, PictureInPicture2, Keyboard, HelpCircle } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { motion } from 'motion/react';
 import { formatDuration } from '../lib/utils';
 import { useTheme } from '../ThemeContext';
 import { useToast } from '../ToastContext';
+import { QRCodeSvg } from '../lib/qrSvg';
 
 export default function VideoView() {
   const { id } = useParams<{ id: string }>();
@@ -14,10 +15,16 @@ export default function VideoView() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [copied, setCopied] = useState(false);
+  const [copiedEmbed, setCopiedEmbed] = useState(false);
   const [duration, setDuration] = useState<number | undefined>(undefined);
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(1);
   const [newTagInput, setNewTagInput] = useState('');
   const [isAddingTag, setIsAddingTag] = useState(false);
+  
+  const [isTheatreMode, setIsTheatreMode] = useState(false);
+  const [shareTab, setShareTab] = useState<'link' | 'embed' | 'qr'>('link');
+  const [showShortcutsModal, setShowShortcutsModal] = useState(false);
+
   const videoRef = useRef<HTMLVideoElement>(null);
 
   const { theme, config } = useTheme();
@@ -81,6 +88,69 @@ export default function VideoView() {
     };
   }, [id]);
 
+  // Keyboard shortcuts listener
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Ignore if user is typing in input
+      if (['INPUT', 'TEXTAREA', 'SELECT'].includes((e.target as HTMLElement)?.tagName)) {
+        return;
+      }
+
+      if (!videoRef.current) return;
+
+      if (e.code === 'Space') {
+        e.preventDefault();
+        if (videoRef.current.paused) videoRef.current.play();
+        else videoRef.current.pause();
+      } else if (e.code === 'KeyF') {
+        e.preventDefault();
+        if (document.fullscreenElement) {
+          document.exitFullscreen();
+        } else {
+          videoRef.current.requestFullscreen();
+        }
+      } else if (e.code === 'KeyM') {
+        e.preventDefault();
+        videoRef.current.muted = !videoRef.current.muted;
+        toast.info(videoRef.current.muted ? 'Muted' : 'Unmuted', 'Audio Toggle');
+      } else if (e.code === 'ArrowLeft') {
+        e.preventDefault();
+        videoRef.current.currentTime = Math.max(0, videoRef.current.currentTime - 5);
+      } else if (e.code === 'ArrowRight') {
+        e.preventDefault();
+        videoRef.current.currentTime = Math.min(videoRef.current.duration || 0, videoRef.current.currentTime + 5);
+      } else if (e.code === 'KeyT') {
+        e.preventDefault();
+        setIsTheatreMode(prev => !prev);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  const handleSeek = (seconds: number) => {
+    if (videoRef.current) {
+      videoRef.current.currentTime = Math.min(
+        Math.max(0, videoRef.current.currentTime + seconds),
+        videoRef.current.duration || 0
+      );
+    }
+  };
+
+  const handleTogglePiP = async () => {
+    if (!videoRef.current) return;
+    try {
+      if (document.pictureInPictureElement) {
+        await document.exitPictureInPicture();
+      } else {
+        await videoRef.current.requestPictureInPicture();
+      }
+    } catch (e) {
+      toast.error('Picture-in-Picture is not supported in this browser environment', 'PiP Unavailable');
+    }
+  };
+
   const handleLoadedMetadata = (e: SyntheticEvent<HTMLVideoElement, Event>) => {
     const dur = e.currentTarget.duration;
     if (dur && isFinite(dur) && dur > 0) {
@@ -104,6 +174,15 @@ export default function VideoView() {
     setCopied(true);
     toast.success('Direct share URL copied to clipboard!', 'Link Copied');
     setTimeout(() => setCopied(false), 2000);
+  };
+
+  const embedCodeSnippet = video ? `<iframe src="${window.location.href}" width="640" height="360" frameborder="0" allowfullscreen></iframe>` : '';
+
+  const handleCopyEmbed = () => {
+    navigator.clipboard.writeText(embedCodeSnippet);
+    setCopiedEmbed(true);
+    toast.success('HTML embed snippet copied to clipboard!', 'Embed Code Copied');
+    setTimeout(() => setCopiedEmbed(false), 2000);
   };
 
   if (loading) {
@@ -262,17 +341,41 @@ export default function VideoView() {
   const downloadSrc = video.downloadUrl || `/uploads/${video.filename}`;
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 h-full pb-10">
-      <div className="col-span-1 lg:col-span-8 flex flex-col gap-6">
+    <div className={`grid grid-cols-1 ${isTheatreMode ? '' : 'lg:grid-cols-12'} gap-8 h-full pb-10 transition-all duration-300`}>
+      <div className={`col-span-1 ${isTheatreMode ? 'w-full' : 'lg:col-span-8'} flex flex-col gap-6`}>
         
-        {/* Back Link */}
-        <Link to="/" className={`inline-flex items-center gap-2 text-xs font-mono ${config.textSecondary} hover:${config.accentColor} transition-colors group`}>
-          <ArrowLeft className="w-4 h-4 group-hover:-translate-x-1 transition-transform" />
-          <span>Back to Assets Dashboard</span>
-        </Link>
+        {/* Top Header Navigation & Theatre Mode Controls */}
+        <div className="flex items-center justify-between">
+          <Link to="/" className={`inline-flex items-center gap-2 text-xs font-mono ${config.textSecondary} hover:${config.accentColor} transition-colors group`}>
+            <ArrowLeft className="w-4 h-4 group-hover:-translate-x-1 transition-transform" />
+            <span>Back to Assets Dashboard</span>
+          </Link>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setShowShortcutsModal(true)}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border ${config.borderClass} ${config.cardBgClass} text-xs font-mono ${config.textSecondary} hover:${config.textPrimary} transition-all`}
+              title="Keyboard Shortcuts"
+            >
+              <Keyboard className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Shortcuts</span>
+            </button>
+
+            <button
+              onClick={() => setIsTheatreMode(prev => !prev)}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border ${config.borderClass} ${
+                isTheatreMode ? 'bg-emerald-500 text-slate-950 font-bold' : `${config.cardBgClass} ${config.textSecondary} hover:${config.textPrimary}`
+              } text-xs font-mono transition-all`}
+              title="Toggle Theatre Mode (T)"
+            >
+              {isTheatreMode ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
+              <span className="hidden sm:inline">{isTheatreMode ? 'Exit Theatre' : 'Theatre Mode'}</span>
+            </button>
+          </div>
+        </div>
 
         {/* Cinema Video Container */}
-        <div className={`relative aspect-video ${theme === 'light' ? 'bg-slate-900' : 'bg-[#030508]'} rounded-3xl overflow-hidden border ${config.borderClass} shadow-2xl group`}>
+        <div className={`relative ${isTheatreMode ? 'aspect-[21/9]' : 'aspect-video'} ${theme === 'light' ? 'bg-slate-900' : 'bg-[#030508]'} rounded-3xl overflow-hidden border ${config.borderClass} shadow-2xl group transition-all duration-300`}>
           <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent pointer-events-none z-10" />
           <video 
             ref={videoRef}
@@ -292,27 +395,54 @@ export default function VideoView() {
           </video>
         </div>
 
-        {/* Playback Speed Controls Bar */}
+        {/* Pro Playback Controls Bar */}
         <div className={`flex flex-wrap items-center justify-between gap-3 px-4 py-3 rounded-2xl border ${config.borderClass} ${config.cardBgClass} shadow-lg`}>
           <div className="flex items-center gap-2">
-            <Gauge className={`w-4 h-4 ${config.accentColor}`} />
-            <span className={`text-xs font-semibold ${config.textPrimary}`}>Playback Speed</span>
+            <button
+              onClick={() => handleSeek(-5)}
+              className={`p-1.5 rounded-lg border ${config.borderClass} ${config.textSecondary} hover:${config.textPrimary} hover:bg-white/5 transition-all text-xs font-mono flex items-center gap-1`}
+              title="Seek back 5s (←)"
+            >
+              <SkipBack className="w-3.5 h-3.5" /> -5s
+            </button>
+            <button
+              onClick={() => handleSeek(5)}
+              className={`p-1.5 rounded-lg border ${config.borderClass} ${config.textSecondary} hover:${config.textPrimary} hover:bg-white/5 transition-all text-xs font-mono flex items-center gap-1`}
+              title="Seek forward 5s (→)"
+            >
+              +5s <SkipForward className="w-3.5 h-3.5" />
+            </button>
           </div>
 
-          <div className="flex items-center gap-1 sm:gap-1.5 p-1 rounded-xl bg-black/10 dark:bg-white/5 border border-white/10">
-            {[0.5, 1, 1.25, 1.5, 2].map((speed) => (
-              <button
-                key={speed}
-                onClick={() => handleSpeedChange(speed)}
-                className={`px-2.5 sm:px-3 py-1 rounded-lg text-xs font-mono font-medium transition-all duration-150 ${
-                  playbackSpeed === speed
-                    ? 'bg-amber-500 text-slate-950 font-bold shadow-md scale-105'
-                    : `${config.textSecondary} hover:${config.textPrimary} hover:bg-white/10`
-                }`}
-              >
-                {speed}x
-              </button>
-            ))}
+          <div className="flex items-center gap-2">
+            <Gauge className={`w-4 h-4 ${config.accentColor}`} />
+            <span className={`text-xs font-semibold ${config.textPrimary} hidden sm:inline`}>Speed:</span>
+            <div className="flex items-center gap-1 sm:gap-1.5 p-1 rounded-xl bg-black/10 dark:bg-white/5 border border-white/10">
+              {[0.5, 1, 1.25, 1.5, 2].map((speed) => (
+                <button
+                  key={speed}
+                  onClick={() => handleSpeedChange(speed)}
+                  className={`px-2.5 sm:px-3 py-1 rounded-lg text-xs font-mono font-medium transition-all duration-150 ${
+                    playbackSpeed === speed
+                      ? 'bg-amber-500 text-slate-950 font-bold shadow-md scale-105'
+                      : `${config.textSecondary} hover:${config.textPrimary} hover:bg-white/10`
+                  }`}
+                >
+                  {speed}x
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleTogglePiP}
+              className={`p-2 rounded-xl border ${config.borderClass} ${config.textSecondary} hover:${config.textPrimary} hover:bg-white/5 transition-all text-xs flex items-center gap-1.5`}
+              title="Toggle Picture-In-Picture"
+            >
+              <PictureInPicture2 className="w-4 h-4" />
+              <span className="hidden md:inline">PiP</span>
+            </button>
           </div>
         </div>
 
@@ -401,33 +531,177 @@ export default function VideoView() {
               className={`inline-flex items-center gap-2 px-5 py-2.5 rounded-2xl ${config.buttonSecondary} border text-xs font-semibold transition-all shadow-md`}
             >
               <Download className={`w-4 h-4 ${config.accentColor}`} />
-              <span>Download</span>
+              <span>Download Video</span>
             </a>
           </div>
         </div>
 
-        {/* Share Link Banner Card */}
-        <div className={`${config.cardBgClass} p-5 sm:p-6 rounded-2xl border ${config.borderClass} flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-xl`}>
-          <div className="min-w-0 flex-1">
-            <p className={`text-[10px] font-mono uppercase tracking-widest ${config.textSecondary} mb-1`}>Direct Shareable Link</p>
-            <p className={`font-mono text-xs sm:text-sm ${config.accentColor} truncate ${theme === 'light' ? 'bg-slate-100 border-slate-200' : 'bg-black/40 border-white/10'} px-3 py-2 rounded-xl border`}>{shareUrl}</p>
+        {/* Tabbed Share & Integration Studio Card */}
+        <div className={`${config.cardBgClass} p-5 sm:p-6 rounded-3xl border ${config.borderClass} flex flex-col gap-5 shadow-xl`}>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-white/5 pb-3">
+            <div className="flex items-center gap-2">
+              <Share2 className={`w-4 h-4 ${config.accentColor}`} />
+              <h3 className={`text-xs font-semibold uppercase tracking-wider ${config.textPrimary}`}>Share & Integration Studio</h3>
+            </div>
+
+            {/* Studio Navigation Tabs */}
+            <div className="flex items-center gap-1 p-1 rounded-xl bg-black/10 dark:bg-white/5 border border-white/10">
+              <button
+                onClick={() => setShareTab('link')}
+                className={`px-3 py-1 rounded-lg text-xs font-mono transition-all flex items-center gap-1.5 ${
+                  shareTab === 'link'
+                    ? 'bg-emerald-500 text-slate-950 font-bold shadow-md'
+                    : `${config.textSecondary} hover:${config.textPrimary}`
+                }`}
+              >
+                <Share2 className="w-3.5 h-3.5" />
+                <span>Direct Link</span>
+              </button>
+
+              <button
+                onClick={() => setShareTab('embed')}
+                className={`px-3 py-1 rounded-lg text-xs font-mono transition-all flex items-center gap-1.5 ${
+                  shareTab === 'embed'
+                    ? 'bg-emerald-500 text-slate-950 font-bold shadow-md'
+                    : `${config.textSecondary} hover:${config.textPrimary}`
+                }`}
+              >
+                <Code className="w-3.5 h-3.5" />
+                <span>HTML Embed</span>
+              </button>
+
+              <button
+                onClick={() => setShareTab('qr')}
+                className={`px-3 py-1 rounded-lg text-xs font-mono transition-all flex items-center gap-1.5 ${
+                  shareTab === 'qr'
+                    ? 'bg-emerald-500 text-slate-950 font-bold shadow-md'
+                    : `${config.textSecondary} hover:${config.textPrimary}`
+                }`}
+              >
+                <QrCode className="w-3.5 h-3.5" />
+                <span>Mobile QR</span>
+              </button>
+            </div>
           </div>
-          <button
-            onClick={handleCopyLink}
-            className={`shrink-0 inline-flex items-center justify-center gap-2 px-6 py-3 rounded-2xl ${config.buttonPrimary} text-xs shadow-lg transition-all`}
-          >
-            {copied ? (
-              <>
-                <Check className="w-4 h-4" /> Link Copied!
-              </>
-            ) : (
-              <>
-                <Copy className="w-4 h-4" /> Copy Link
-              </>
-            )}
-          </button>
+
+          {/* TAB 1: Direct Link */}
+          {shareTab === 'link' && (
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 animate-in fade-in">
+              <div className="min-w-0 flex-1">
+                <p className={`text-[10px] font-mono uppercase tracking-widest ${config.textSecondary} mb-1`}>Direct Shareable Link</p>
+                <p className={`font-mono text-xs sm:text-sm ${config.accentColor} truncate ${theme === 'light' ? 'bg-slate-100 border-slate-200' : 'bg-black/40 border-white/10'} px-3 py-2 rounded-xl border select-all`}>{shareUrl}</p>
+              </div>
+              <button
+                onClick={handleCopyLink}
+                className={`shrink-0 inline-flex items-center justify-center gap-2 px-6 py-3 rounded-2xl ${config.buttonPrimary} text-xs shadow-lg transition-all`}
+              >
+                {copied ? (
+                  <>
+                    <Check className="w-4 h-4" /> Link Copied!
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-4 h-4" /> Copy Link
+                  </>
+                )}
+              </button>
+            </div>
+          )}
+
+          {/* TAB 2: HTML Embed Code */}
+          {shareTab === 'embed' && (
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 animate-in fade-in">
+              <div className="min-w-0 flex-1">
+                <p className={`text-[10px] font-mono uppercase tracking-widest ${config.textSecondary} mb-1`}>Responsive iFrame Snippet</p>
+                <p className={`font-mono text-xs ${config.accentColor} break-all ${theme === 'light' ? 'bg-slate-100 border-slate-200' : 'bg-black/40 border-white/10'} px-3 py-2 rounded-xl border select-all`}>
+                  {embedCodeSnippet}
+                </p>
+              </div>
+              <button
+                onClick={handleCopyEmbed}
+                className={`shrink-0 inline-flex items-center justify-center gap-2 px-6 py-3 rounded-2xl ${config.buttonPrimary} text-xs shadow-lg transition-all`}
+              >
+                {copiedEmbed ? (
+                  <>
+                    <Check className="w-4 h-4" /> Embed Copied!
+                  </>
+                ) : (
+                  <>
+                    <Code className="w-4 h-4" /> Copy Embed
+                  </>
+                )}
+              </button>
+            </div>
+          )}
+
+          {/* TAB 3: Instant Mobile QR Code */}
+          {shareTab === 'qr' && (
+            <div className="flex flex-col sm:flex-row items-center gap-6 p-2 animate-in fade-in">
+              <div className="shrink-0">
+                <QRCodeSvg value={shareUrl} size={150} darkColor={theme === 'light' ? '#0f172a' : '#10b981'} />
+              </div>
+              <div className="space-y-2 text-center sm:text-left">
+                <h4 className={`text-sm font-semibold ${config.textPrimary}`}>Scan to Play on Smartphone</h4>
+                <p className={`text-xs ${config.textSecondary} leading-relaxed max-w-sm`}>
+                  Point your mobile device camera at this QR code to instantly stream this media asset on iOS or Android.
+                </p>
+                <p className={`text-[10px] font-mono ${config.accentColor}`}>No login or app install required.</p>
+              </div>
+            </div>
+          )}
         </div>
       </div>
+
+      {/* Shortcuts Helper Modal */}
+      {showShortcutsModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setShowShortcutsModal(false)}>
+          <div className={`max-w-md w-full p-6 rounded-3xl border ${config.borderClass} ${config.cardBgClass} shadow-2xl space-y-5 animate-in zoom-in-95`} onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between border-b border-white/10 pb-3">
+              <div className="flex items-center gap-2">
+                <Keyboard className={`w-5 h-5 ${config.accentColor}`} />
+                <h3 className={`text-sm font-bold ${config.textPrimary}`}>Playback Keyboard Shortcuts</h3>
+              </div>
+              <button onClick={() => setShowShortcutsModal(false)} className="text-slate-400 hover:text-white">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs font-mono">
+              <div className="flex items-center justify-between p-2 rounded-xl bg-black/20 border border-white/5">
+                <span className={config.textSecondary}>Play / Pause</span>
+                <kbd className="px-2 py-1 rounded bg-white/10 text-emerald-400 font-bold border border-white/20">Space</kbd>
+              </div>
+              <div className="flex items-center justify-between p-2 rounded-xl bg-black/20 border border-white/5">
+                <span className={config.textSecondary}>Toggle Fullscreen</span>
+                <kbd className="px-2 py-1 rounded bg-white/10 text-emerald-400 font-bold border border-white/20">F</kbd>
+              </div>
+              <div className="flex items-center justify-between p-2 rounded-xl bg-black/20 border border-white/5">
+                <span className={config.textSecondary}>Toggle Mute</span>
+                <kbd className="px-2 py-1 rounded bg-white/10 text-emerald-400 font-bold border border-white/20">M</kbd>
+              </div>
+              <div className="flex items-center justify-between p-2 rounded-xl bg-black/20 border border-white/5">
+                <span className={config.textSecondary}>Seek Back 5 seconds</span>
+                <kbd className="px-2 py-1 rounded bg-white/10 text-emerald-400 font-bold border border-white/20">← Left</kbd>
+              </div>
+              <div className="flex items-center justify-between p-2 rounded-xl bg-black/20 border border-white/5">
+                <span className={config.textSecondary}>Seek Forward 5 seconds</span>
+                <kbd className="px-2 py-1 rounded bg-white/10 text-emerald-400 font-bold border border-white/20">→ Right</kbd>
+              </div>
+              <div className="flex items-center justify-between p-2 rounded-xl bg-black/20 border border-white/5">
+                <span className={config.textSecondary}>Toggle Theatre Mode</span>
+                <kbd className="px-2 py-1 rounded bg-white/10 text-emerald-400 font-bold border border-white/20">T</kbd>
+              </div>
+            </div>
+
+            <button
+              onClick={() => setShowShortcutsModal(false)}
+              className={`w-full py-2.5 rounded-2xl ${config.buttonPrimary} text-xs font-semibold shadow-lg`}
+            >
+              Got It
+            </button>
+          </div>
+        </div>
+      )}
       
       {/* Sidebar Metadata Card */}
       <div className={`col-span-1 lg:col-span-4 flex flex-col gap-4 lg:border-l ${config.borderClass} lg:pl-8`}>
