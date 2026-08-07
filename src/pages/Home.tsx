@@ -49,43 +49,32 @@ export default function Home() {
 
       try {
         const res = await fetch('/api/videos');
+        let serverVideos: VideoMeta[] = [];
         if (res.ok) {
           const data = await res.json();
-          const serverVideos: VideoMeta[] = Array.isArray(data) ? data : [];
-          const serverIds = new Set(serverVideos.map(v => v.id));
-
-          // Read existing local videos
-          let localVideos: VideoMeta[] = [];
-          if (saved) {
-            try { localVideos = JSON.parse(saved); } catch (e) {}
-          }
-
-          // Register any local videos missing from server DB
-          localVideos.forEach(localVid => {
-            if (!serverIds.has(localVid.id)) {
-              fetch('/api/videos/register', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(localVid)
-              }).catch(() => {});
-            }
-          });
-
-          const map = new Map<string, VideoMeta>();
-          localVideos.forEach(v => map.set(v.id, v));
-          serverVideos.forEach((srv: VideoMeta) => {
-            const existing = map.get(srv.id);
-            map.set(srv.id, {
-              ...srv,
-              thumbnailUrl: srv.thumbnailUrl || existing?.thumbnailUrl,
-              dataUrl: srv.dataUrl || existing?.dataUrl,
-              duration: srv.duration || existing?.duration
-            });
-          });
-          const merged = Array.from(map.values());
-          setRecentVideos(merged);
-          localStorage.setItem('recent_videos', JSON.stringify(merged));
+          serverVideos = Array.isArray(data) ? data : [];
         }
+        const serverIds = new Set(serverVideos.map(v => v.id));
+
+        // Read existing local videos uploaded on this device
+        let localVideos: VideoMeta[] = [];
+        if (saved) {
+          try { localVideos = JSON.parse(saved); } catch (e) {}
+        }
+
+        // Auto-register any local videos missing from server DB so friends with links can always watch
+        localVideos.forEach(localVid => {
+          if (!serverIds.has(localVid.id)) {
+            fetch('/api/videos/register', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(localVid)
+            }).catch(() => {});
+          }
+        });
+
+        // Homepage shows videos uploaded on this device (Unlisted / Link-Only privacy model)
+        setRecentVideos(localVideos);
       } catch (e) { }
     };
     

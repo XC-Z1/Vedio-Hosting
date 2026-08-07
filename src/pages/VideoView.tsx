@@ -449,8 +449,13 @@ export default function VideoView() {
         {/* Title & Stats Bar */}
         <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4 pt-2">
           <div className="space-y-2 max-w-xl">
-            <div className={`inline-flex items-center gap-2 px-3 py-1 rounded-full ${config.badgeClass} text-[10px] font-mono`}>
-              <Film className="w-3 h-3" /> Uncompressed Source
+            <div className="flex flex-wrap items-center gap-2">
+              <div className={`inline-flex items-center gap-2 px-3 py-1 rounded-full ${config.badgeClass} text-[10px] font-mono`}>
+                <Film className="w-3 h-3" /> Uncompressed Source
+              </div>
+              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[10px] font-mono font-medium">
+                <Shield className="w-3 h-3" /> Private Link-Only
+              </div>
             </div>
             <h2 className={`text-3xl sm:text-4xl font-serif italic ${config.textPrimary} break-all leading-tight`}>{video.originalName}</h2>
             <p className={`text-xs ${config.textSecondary} font-mono pt-0.5`}>

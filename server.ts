@@ -83,7 +83,15 @@ const getDb = () => {
 const saveDb = (data: any) => {
   dbCache = data;
   try {
-    fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2));
+    const cleanData = {
+      videos: (data.videos || []).map((v: any) => {
+        // Strip out giant base64 dataUrl before saving metadata to db.json
+        // This keeps db.json lightweight, fast, and 100% crash-proof
+        const { dataUrl, ...rest } = v;
+        return rest;
+      })
+    };
+    fs.writeFileSync(DB_FILE, JSON.stringify(cleanData, null, 2));
   } catch (e) {
     console.error('Failed to save DB_FILE:', e);
   }
@@ -422,15 +430,33 @@ app.post('/api/videos/register', express.json({ limit: '100mb' }), (req, res) =>
       return res.status(400).json({ error: 'Missing video ID' });
     }
 
+    const cleanFilename = filename || `${id}.mp4`;
+    const targetFilePath = path.join(UPLOADS_DIR, cleanFilename);
+
+    // If dataUrl is supplied and file on disk does not exist, save buffer to disk
+    if (dataUrl && typeof dataUrl === 'string' && dataUrl.startsWith('data:')) {
+      try {
+        if (!fs.existsSync(targetFilePath)) {
+          const matches = dataUrl.match(/^data:(.+);base64,(.+)$/);
+          if (matches && matches[2]) {
+            const buf = Buffer.from(matches[2], 'base64');
+            fs.writeFileSync(targetFilePath, buf);
+          }
+        }
+      } catch (fileErr) {
+        console.warn('Could not write registered dataUrl to disk file:', fileErr);
+      }
+    }
+
     const db = getDb();
     const existingIndex = db.videos.findIndex((v: any) => v.id === id);
     const videoObj = {
       id,
-      filename: filename || `${id}.mp4`,
+      filename: cleanFilename,
       originalName: originalName || 'Video Asset',
       mimetype: mimetype || 'video/mp4',
       size: size || 0,
-      downloadUrl: downloadUrl || `/uploads/${filename || id + '.mp4'}`,
+      downloadUrl: downloadUrl || `/uploads/${cleanFilename}`,
       tags: Array.isArray(tags) ? tags : [],
       createdAt: createdAt || new Date().toISOString(),
       viewCount: viewCount || 0,
