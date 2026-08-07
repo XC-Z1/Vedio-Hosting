@@ -62,8 +62,8 @@ const inMemoryChunks = new Map<string, Map<number, Buffer>>();
 // Simple JSON database with in-memory caching for zero race conditions
 let dbCache: { videos: any[] } | null = null;
 
-const getDb = () => {
-  if (!dbCache) {
+const getDb = (forceReload = false) => {
+  if (!dbCache || forceReload) {
     if (fs.existsSync(DB_FILE)) {
       try {
         dbCache = JSON.parse(fs.readFileSync(DB_FILE, 'utf-8'));
