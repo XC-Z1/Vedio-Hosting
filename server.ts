@@ -47,7 +47,8 @@ const saveDb = (data: any) => {
   }
 };
 
-// Multer setup for local file storage
+// Multer setup for file storage
+const memoryUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 100 * 1024 * 1024 } });
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, UPLOADS_DIR),
   filename: (req, file, cb) => {
@@ -127,29 +128,102 @@ app.use('/uploads', express.static(UPLOADS_DIR));
 
 // API Routes
 app.post('/api/upload-chunk', (req, res) => {
-  upload.single('chunk')(req, res, (err) => {
+  memoryUpload.single('chunk')(req, res, (err) => {
     if (err) {
-      console.error('Multer error:', err);
-      return res.status(400).json({ error: err.message || 'Chunk upload failed' });
-    }
-
-    const { uploadId, chunkIndex } = req.body;
-    const chunkFile = req.file;
-
-    if (!chunkFile || !uploadId || chunkIndex === undefined) {
-      return res.status(400).json({ error: 'Missing chunk data' });
+      console.error('Multer chunk upload error:', err);
+      return res.status(400).json({ error: err.message || 'Failed to parse chunk data' });
     }
 
     try {
-      const chunkPath = path.join(UPLOADS_DIR, `${uploadId}_${chunkIndex}`);
-      if (fs.existsSync(chunkPath)) {
-        try { fs.unlinkSync(chunkPath); } catch (e) {}
+      const { uploadId, chunkIndex } = req.body;
+      const chunkFile = req.file;
+
+      if (!chunkFile || !uploadId || chunkIndex === undefined) {
+        return res.status(400).json({ error: 'Missing required chunk data or parameters' });
       }
-      fs.renameSync(chunkFile.path, chunkPath);
-      res.json({ success: true });
+
+      if (!fs.existsSync(UPLOADS_DIR)) {
+        fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+      }
+
+      const chunkPath = path.join(UPLOADS_DIR, `${uploadId}_${chunkIndex}`);
+      fs.writeFileSync(chunkPath, chunkFile.buffer);
+
+      return res.json({ success: true });
     } catch (e: any) {
-      console.error('Rename error:', e);
-      res.status(500).json({ error: e?.message || 'Failed to save chunk' });
+      console.error('Save chunk error:', e);
+      return res.status(500).json({ error: e?.message || 'Failed to write chunk file to disk' });
+    }
+  });
+});
+
+// Single file direct upload fallback
+app.post('/api/upload-direct', (req, res) => {
+  memoryUpload.single('video')(req, res, (err) => {
+    if (err) {
+      console.error('Direct upload error:', err);
+      return res.status(400).json({ error: err.message || 'Direct upload failed' });
+    }
+
+    try {
+      const videoFile = req.file;
+      const { title, tags } = req.body;
+
+      if (!videoFile) {
+        return res.status(400).json({ error: 'No video file provided' });
+      }
+
+      if (videoFile.size > 100 * 1024 * 1024) {
+        return res.status(400).json({ error: 'File size exceeds 100MB limit' });
+      }
+
+      if (!fs.existsSync(UPLOADS_DIR)) {
+        fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+      }
+
+      const id = uuidv4();
+      const ext = path.extname(videoFile.originalname) || '.mp4';
+      const finalFileName = `${id}${ext}`;
+      const finalPath = path.join(UPLOADS_DIR, finalFileName);
+
+      fs.writeFileSync(finalPath, videoFile.buffer);
+
+      const cleanTitle = (typeof title === 'string' && title.trim()) ? title.trim() : videoFile.originalname;
+      
+      let parsedTags: string[] = [];
+      if (Array.isArray(tags)) {
+        parsedTags = tags.map(t => String(t).trim().toLowerCase().replace(/^#/, '')).filter(Boolean);
+      } else if (typeof tags === 'string' && tags.trim()) {
+        try {
+          const jsonTags = JSON.parse(tags);
+          if (Array.isArray(jsonTags)) {
+            parsedTags = jsonTags.map(t => String(t).trim().toLowerCase().replace(/^#/, '')).filter(Boolean);
+          }
+        } catch (e) {
+          parsedTags = tags.split(',').map(t => t.trim().toLowerCase().replace(/^#/, '')).filter(Boolean);
+        }
+      }
+
+      const db = getDb();
+      const newVideo = {
+        id,
+        filename: finalFileName,
+        originalName: videoFile.originalname,
+        mimeType: videoFile.mimetype || 'video/mp4',
+        size: videoFile.size,
+        createdAt: new Date().toISOString(),
+        title: cleanTitle,
+        tags: parsedTags,
+        viewCount: 0
+      };
+
+      db.videos.unshift(newVideo);
+      saveDb(db);
+
+      return res.json({ success: true, video: newVideo });
+    } catch (e: any) {
+      console.error('Direct upload save error:', e);
+      return res.status(500).json({ error: e?.message || 'Failed to save uploaded video' });
     }
   });
 });

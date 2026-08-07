@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
 import { UploadCloud, FileVideo, Shield, Zap, Sparkles, Search, Copy, Check, Trash2, ExternalLink, Film, AlertCircle, Palette, Tag, Plus, X, LayoutGrid, List, ArrowUpDown, HardDrive, Eye, Activity, Clock } from 'lucide-react';
 import { cn, formatDuration } from '../lib/utils';
 import { Link, useNavigate } from 'react-router-dom';
@@ -149,15 +150,81 @@ export default function Home() {
   };
 
   const uploadFile = async (file: File, titleToSend?: string, tagsToSend?: string[]) => {
+    // Check browser compatibility for Blob / File / FormData / XMLHttpRequest APIs
+    if (typeof window === 'undefined' || !window.File || !window.FileReader || !window.Blob || !window.FormData || !window.XMLHttpRequest) {
+      const browserErr = 'Your browser does not support standard HTML5 File/Blob upload APIs. Please try using modern Google Chrome or Safari.';
+      setUploadError(browserErr);
+      toast.error(browserErr, 'Browser Incompatible');
+      return;
+    }
+
     setIsUploading(true);
     setUploadProgress(0);
     setUploadError(null);
 
-    const chunkSize = 512 * 1024;
+    // Direct single-pass upload function for fallback
+    const performDirectUpload = async () => {
+      return new Promise<void>((resolve, reject) => {
+        const formData = new FormData();
+        // Browser automatically sets Content-Type to multipart/form-data with boundary
+        formData.append('video', file, file.name);
+        formData.append('title', titleToSend || customVideoTitle || file.name);
+        formData.append('tags', JSON.stringify(tagsToSend || stagedTags));
+
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', '/api/upload-direct');
+
+        xhr.upload.onprogress = (e) => {
+          if (e.lengthComputable) {
+            const overallProgress = Math.round((e.loaded / e.total) * 100);
+            setUploadProgress(overallProgress);
+          }
+        };
+
+        xhr.onload = () => {
+          if (xhr.status === 200) {
+            try {
+              const resData = JSON.parse(xhr.responseText);
+              if (resData.success && resData.video) {
+                setIsUploading(false);
+                setStagedFile(null);
+                setStagedTags([]);
+                addRecentVideo(resData.video);
+                toast.success(`"${resData.video.originalName}" uploaded successfully!`, 'Upload Complete');
+                navigate(`/v/${resData.video.id}`);
+                resolve();
+              } else {
+                reject(new Error(resData.error || 'Server error during upload'));
+              }
+            } catch (e) {
+              reject(new Error('Invalid server response during direct upload.'));
+            }
+          } else {
+            let msg = `Server returned status ${xhr.status}`;
+            try {
+              const parsed = JSON.parse(xhr.responseText);
+              if (parsed.error) msg = parsed.error;
+            } catch (e) {}
+            reject(new Error(msg));
+          }
+        };
+
+        xhr.onerror = () => reject(new Error('Network connectivity failure during direct upload.'));
+        xhr.send(formData);
+      });
+    };
+
+    const chunkSize = 512 * 1024; // 512KB chunks
     const totalChunks = Math.ceil(file.size / chunkSize);
     const uploadId = Date.now().toString() + '_' + Math.random().toString(36).substring(7);
 
     try {
+      // For small files (< 2MB) or browsers with slice issues, use direct single-request upload
+      if (file.size <= 2 * 1024 * 1024 || !file.slice) {
+        await performDirectUpload();
+        return;
+      }
+
       for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
         const start = chunkIndex * chunkSize;
         const end = Math.min(start + chunkSize, file.size);
@@ -172,6 +239,7 @@ export default function Home() {
           try {
             await new Promise((resolve, reject) => {
               const formData = new FormData();
+              // Note: Do NOT set Content-Type header manually when sending FormData; XHR handles the boundary
               formData.append('chunk', chunk, 'chunk.bin');
               formData.append('uploadId', uploadId);
               formData.append('chunkIndex', chunkIndex.toString());
@@ -246,11 +314,17 @@ export default function Home() {
         throw new Error('Invalid server response.');
       }
 
-    } catch (err) {
-      setIsUploading(false);
-      const errMsg = err instanceof Error ? err.message : 'Upload failed. Please try again.';
-      setUploadError(errMsg);
-      toast.error(errMsg, 'Upload Failed');
+    } catch (err: any) {
+      console.warn('Chunked upload failed, attempting direct upload fallback:', err);
+      // Attempt direct fallback if chunking failed
+      try {
+        await performDirectUpload();
+      } catch (fallbackErr: any) {
+        setIsUploading(false);
+        const errMsg = fallbackErr?.message || err?.message || 'Upload failed. Please try again.';
+        setUploadError(errMsg);
+        toast.error(errMsg, 'Upload Failed');
+      }
     }
   };
 
@@ -695,30 +769,141 @@ export default function Home() {
 
           {/* Video Assets Display */}
           <div className="overflow-y-auto max-h-[620px] pr-1 space-y-3">
-            {filteredVideos.length === 0 ? (
-              <div className={`p-8 rounded-3xl border ${config.borderClass} border-dashed text-center ${config.cardBgClass}`}>
-                <FileVideo className={`w-8 h-8 ${config.textSecondary} mx-auto mb-2 opacity-50`} />
-                <p className={`text-xs ${config.textSecondary} leading-relaxed font-light`}>
-                  {searchQuery || selectedFilterTag ? 'No matching videos or tags found' : 'No recent video uploads'}
-                </p>
-              </div>
-            ) : viewMode === 'grid' ? (
-              /* GRID VIEW MODE */
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {filteredVideos.map((video) => (
-                  <div 
-                    key={video.id} 
-                    className={`group flex flex-col p-3 rounded-2xl border ${config.borderClass} ${config.cardBgClass} hover:border-emerald-500/40 hover:shadow-xl transition-all duration-300 relative`}
-                  >
-                    <VideoPreviewThumbnail
-                      video={video}
-                      onClick={() => navigate(`/v/${video.id}`)}
-                      onDurationLoaded={handleDurationLoaded}
-                      className="w-full h-28 rounded-xl overflow-hidden shrink-0 mb-2.5"
-                    />
+            <AnimatePresence mode="popLayout">
+              {filteredVideos.length === 0 ? (
+                <motion.div
+                  key="empty-state"
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.95 }}
+                  transition={{ duration: 0.2 }}
+                  className={`p-8 rounded-3xl border ${config.borderClass} border-dashed text-center ${config.cardBgClass}`}
+                >
+                  <FileVideo className={`w-8 h-8 ${config.textSecondary} mx-auto mb-2 opacity-50`} />
+                  <p className={`text-xs ${config.textSecondary} leading-relaxed font-light`}>
+                    {searchQuery || selectedFilterTag ? 'No matching videos or tags found' : 'No recent video uploads'}
+                  </p>
+                </motion.div>
+              ) : viewMode === 'grid' ? (
+                /* GRID VIEW MODE */
+                <motion.div key="grid-view" className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {filteredVideos.map((video) => (
+                    <motion.div 
+                      key={video.id} 
+                      layout
+                      initial={{ opacity: 0, scale: 0.9, y: 12 }}
+                      animate={{ opacity: 1, scale: 1, y: 0 }}
+                      exit={{ opacity: 0, scale: 0.88, y: -12 }}
+                      transition={{ duration: 0.22, ease: 'easeInOut' }}
+                      className={`group flex flex-col p-3 rounded-2xl border ${config.borderClass} ${config.cardBgClass} hover:border-emerald-500/40 hover:shadow-xl transition-all duration-300 relative`}
+                    >
+                      <VideoPreviewThumbnail
+                        video={video}
+                        onClick={() => navigate(`/v/${video.id}`)}
+                        onDurationLoaded={handleDurationLoaded}
+                        className="w-full h-28 rounded-xl overflow-hidden shrink-0 mb-2.5"
+                      />
 
-                    <div className="flex flex-col min-w-0 flex-1 justify-between space-y-2">
-                      <div>
+                      <div className="flex flex-col min-w-0 flex-1 justify-between space-y-2">
+                        <div>
+                          <Link to={`/v/${video.id}`} className="block w-full">
+                            <p className={`text-xs font-semibold ${config.textPrimary} group-hover:${config.accentColor} transition-colors truncate`} title={video.originalName}>
+                              {video.originalName}
+                            </p>
+                          </Link>
+                          <p className={`text-[10px] font-mono ${config.textSecondary} mt-0.5`}>
+                            {formatDistanceToNow(new Date(video.createdAt))} ago • {(video.size / (1024 * 1024)).toFixed(1)} MB
+                          </p>
+                        </div>
+
+                        {/* Tag Chips */}
+                        <div className="flex flex-wrap items-center gap-1">
+                          {video.tags && video.tags.length > 0 && video.tags.map((tag, idx) => (
+                            <span
+                              key={idx}
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                setSelectedFilterTag(tag);
+                              }}
+                              className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-mono bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 cursor-pointer hover:bg-emerald-500/20"
+                            >
+                              #{tag}
+                            </span>
+                          ))}
+                        </div>
+
+                        {/* Card Bottom Toolbar */}
+                        <div className="flex items-center justify-between pt-2 border-t border-white/5">
+                          <button 
+                            onClick={(e) => {
+                              e.preventDefault();
+                              navigator.clipboard.writeText(`${window.location.origin}/v/${video.id}`);
+                              setCopiedLink(video.id);
+                              toast.success('Link copied to clipboard!', 'Link Copied');
+                              setTimeout(() => setCopiedLink(null), 2000);
+                            }}
+                            className={`text-[10px] font-mono flex items-center gap-1 ${
+                              copiedLink === video.id ? `${config.accentColor} font-bold` : `${config.textSecondary} hover:${config.textPrimary}`
+                            }`}
+                          >
+                            {copiedLink === video.id ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                            <span>{copiedLink === video.id ? 'Copied' : 'Copy'}</span>
+                          </button>
+
+                          <button 
+                            onClick={async (e) => {
+                              e.preventDefault();
+                              if (confirmDelete !== video.id) {
+                                setConfirmDelete(video.id);
+                                setTimeout(() => setConfirmDelete(null), 3000);
+                                return;
+                              }
+                              try {
+                                await fetch(`/api/videos/${video.id}`, { method: 'DELETE' });
+                                const updated = recentVideos.filter(v => v.id !== video.id);
+                                setRecentVideos(updated);
+                                localStorage.setItem('recent_videos', JSON.stringify(updated));
+                                setConfirmDelete(null);
+                                window.dispatchEvent(new Event('videos_updated'));
+                                toast.info(`"${video.originalName}" has been deleted.`, 'Asset Deleted');
+                              } catch(err) {
+                                console.error(err);
+                                toast.error('Failed to delete asset.', 'Error');
+                              }
+                            }}
+                            className={`text-[10px] font-mono flex items-center gap-1 ${
+                              confirmDelete === video.id ? 'text-red-500 font-bold' : 'text-red-400/50 hover:text-red-400'
+                            }`}
+                          >
+                            <Trash2 className="w-3 h-3" />
+                            <span>{confirmDelete === video.id ? 'Confirm?' : ''}</span>
+                          </button>
+                        </div>
+                      </div>
+                    </motion.div>
+                  ))}
+                </motion.div>
+              ) : (
+                /* LIST VIEW MODE */
+                <motion.div key="list-view" className="flex flex-col gap-2.5">
+                  {filteredVideos.map((video) => (
+                    <motion.div 
+                      key={video.id} 
+                      layout
+                      initial={{ opacity: 0, x: -15, scale: 0.98 }}
+                      animate={{ opacity: 1, x: 0, scale: 1 }}
+                      exit={{ opacity: 0, x: 15, scale: 0.98 }}
+                      transition={{ duration: 0.22, ease: 'easeInOut' }}
+                      className={`group flex flex-col sm:flex-row gap-3 p-3 rounded-2xl border ${config.borderClass} ${config.cardBgClass} hover:shadow-lg transition-all duration-300`}
+                    >
+                      <VideoPreviewThumbnail
+                        video={video}
+                        onClick={() => navigate(`/v/${video.id}`)}
+                        onDurationLoaded={handleDurationLoaded}
+                        className="w-full sm:w-24 h-24 sm:h-16 rounded-xl overflow-hidden shrink-0"
+                      />
+                      <div className="flex flex-col justify-center min-w-0 flex-1">
                         <Link to={`/v/${video.id}`} className="block w-full">
                           <p className={`text-xs font-semibold ${config.textPrimary} group-hover:${config.accentColor} transition-colors truncate`} title={video.originalName}>
                             {video.originalName}
@@ -727,139 +912,68 @@ export default function Home() {
                         <p className={`text-[10px] font-mono ${config.textSecondary} mt-0.5`}>
                           {formatDistanceToNow(new Date(video.createdAt))} ago • {(video.size / (1024 * 1024)).toFixed(1)} MB
                         </p>
-                      </div>
 
-                      {/* Tag Chips */}
-                      <div className="flex flex-wrap items-center gap-1">
-                        {video.tags && video.tags.length > 0 && video.tags.map((tag, idx) => (
-                          <span
-                            key={idx}
-                            onClick={(e) => {
-                              e.preventDefault();
-                              e.stopPropagation();
-                              setSelectedFilterTag(tag);
-                            }}
-                            className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-mono bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 cursor-pointer hover:bg-emerald-500/20"
-                          >
-                            #{tag}
-                          </span>
-                        ))}
-                      </div>
-
-                      {/* Card Bottom Toolbar */}
-                      <div className="flex items-center justify-between pt-2 border-t border-white/5">
-                        <button 
-                          onClick={(e) => {
-                            e.preventDefault();
-                            navigator.clipboard.writeText(`${window.location.origin}/v/${video.id}`);
-                            setCopiedLink(video.id);
-                            toast.success('Link copied to clipboard!', 'Link Copied');
-                            setTimeout(() => setCopiedLink(null), 2000);
-                          }}
-                          className={`text-[10px] font-mono flex items-center gap-1 ${
-                            copiedLink === video.id ? `${config.accentColor} font-bold` : `${config.textSecondary} hover:${config.textPrimary}`
-                          }`}
-                        >
-                          {copiedLink === video.id ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
-                          <span>{copiedLink === video.id ? 'Copied' : 'Copy'}</span>
-                        </button>
-
-                        <button 
-                          onClick={async (e) => {
-                            e.preventDefault();
-                            if (confirmDelete !== video.id) {
-                              setConfirmDelete(video.id);
-                              setTimeout(() => setConfirmDelete(null), 3000);
-                              return;
-                            }
-                            try {
-                              await fetch(`/api/videos/${video.id}`, { method: 'DELETE' });
-                              const updated = recentVideos.filter(v => v.id !== video.id);
-                              setRecentVideos(updated);
-                              localStorage.setItem('recent_videos', JSON.stringify(updated));
-                              setConfirmDelete(null);
-                              window.dispatchEvent(new Event('videos_updated'));
-                              toast.info(`"${video.originalName}" has been deleted.`, 'Asset Deleted');
-                            } catch(err) {
-                              console.error(err);
-                              toast.error('Failed to delete asset.', 'Error');
-                            }
-                          }}
-                          className={`text-[10px] font-mono flex items-center gap-1 ${
-                            confirmDelete === video.id ? 'text-red-500 font-bold' : 'text-red-400/50 hover:text-red-400'
-                          }`}
-                        >
-                          <Trash2 className="w-3 h-3" />
-                          <span>{confirmDelete === video.id ? 'Confirm?' : ''}</span>
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              /* LIST VIEW MODE */
-              <div className="flex flex-col gap-2.5">
-                {filteredVideos.map((video) => (
-                  <div 
-                    key={video.id} 
-                    className={`group flex flex-col sm:flex-row gap-3 p-3 rounded-2xl border ${config.borderClass} ${config.cardBgClass} hover:shadow-lg transition-all duration-300`}
-                  >
-                    <VideoPreviewThumbnail
-                      video={video}
-                      onClick={() => navigate(`/v/${video.id}`)}
-                      onDurationLoaded={handleDurationLoaded}
-                      className="w-full sm:w-24 h-24 sm:h-16 rounded-xl overflow-hidden shrink-0"
-                    />
-                    <div className="flex flex-col justify-center min-w-0 flex-1">
-                      <Link to={`/v/${video.id}`} className="block w-full">
-                        <p className={`text-xs font-semibold ${config.textPrimary} group-hover:${config.accentColor} transition-colors truncate`} title={video.originalName}>
-                          {video.originalName}
-                        </p>
-                      </Link>
-                      <p className={`text-[10px] font-mono ${config.textSecondary} mt-0.5`}>
-                        {formatDistanceToNow(new Date(video.createdAt))} ago • {(video.size / (1024 * 1024)).toFixed(1)} MB
-                      </p>
-
-                      {/* Tag Chips List */}
-                      <div className="flex flex-wrap items-center gap-1 mt-1.5">
-                        {video.tags && video.tags.length > 0 && video.tags.map((tag, idx) => (
-                          <span
-                            key={idx}
-                            onClick={(e) => {
-                              e.preventDefault();
-                              e.stopPropagation();
-                              setSearchQuery(tag);
-                            }}
-                            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 hover:bg-emerald-500/20 transition-colors cursor-pointer"
-                            title={`Click to filter by #${tag}`}
-                          >
-                            #{tag}
-                            <button
+                        {/* Tag Chips List */}
+                        <div className="flex flex-wrap items-center gap-1 mt-1.5">
+                          {video.tags && video.tags.length > 0 && video.tags.map((tag, idx) => (
+                            <span
+                              key={idx}
                               onClick={(e) => {
                                 e.preventDefault();
                                 e.stopPropagation();
-                                const newTags = video.tags?.filter((_, i) => i !== idx) || [];
-                                handleSaveVideoTags(video.id, newTags);
+                                setSearchQuery(tag);
                               }}
-                              className="hover:text-rose-400 transition-colors"
-                              title="Remove tag"
+                              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 hover:bg-emerald-500/20 transition-colors cursor-pointer"
+                              title={`Click to filter by #${tag}`}
                             >
-                              <X className="w-2.5 h-2.5" />
-                            </button>
-                          </span>
-                        ))}
-
-                        {/* Add Tag Button or Input */}
-                        {editingTagVideoId === video.id ? (
-                          <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-                            <input
-                              type="text"
-                              value={editingTagValue}
-                              onChange={(e) => setEditingTagValue(e.target.value)}
-                              onKeyDown={(e) => {
-                                if (e.key === 'Enter') {
+                              #{tag}
+                              <button
+                                onClick={(e) => {
                                   e.preventDefault();
+                                  e.stopPropagation();
+                                  const newTags = video.tags?.filter((_, i) => i !== idx) || [];
+                                  handleSaveVideoTags(video.id, newTags);
+                                }}
+                                className="hover:text-rose-400 transition-colors"
+                                title="Remove tag"
+                              >
+                                <X className="w-2.5 h-2.5" />
+                              </button>
+                            </span>
+                          ))}
+
+                          {/* Add Tag Button or Input */}
+                          {editingTagVideoId === video.id ? (
+                            <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                              <input
+                                type="text"
+                                value={editingTagValue}
+                                onChange={(e) => setEditingTagValue(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    e.preventDefault();
+                                    if (editingTagValue.trim()) {
+                                      const clean = editingTagValue.trim().toLowerCase().replace(/^#/, '');
+                                      const existing = video.tags || [];
+                                      if (!existing.includes(clean)) {
+                                        handleSaveVideoTags(video.id, [...existing, clean]);
+                                      }
+                                      setEditingTagValue('');
+                                      setEditingTagVideoId(null);
+                                    }
+                                  } else if (e.key === 'Escape') {
+                                    setEditingTagVideoId(null);
+                                  }
+                                }}
+                                placeholder="Tag name..."
+                                autoFocus
+                                className={`px-2 py-0.5 text-[10px] font-mono border rounded ${
+                                  theme === 'light' ? 'bg-white text-slate-900 border-slate-300' : 'bg-black/40 text-white border-white/20'
+                                } focus:outline-none focus:border-emerald-500 w-20`}
+                              />
+                              <button
+                                type="button"
+                                onClick={() => {
                                   if (editingTagValue.trim()) {
                                     const clean = editingTagValue.trim().toLowerCase().replace(/^#/, '');
                                     const existing = video.tags || [];
@@ -867,122 +981,101 @@ export default function Home() {
                                       handleSaveVideoTags(video.id, [...existing, clean]);
                                     }
                                     setEditingTagValue('');
-                                    setEditingTagVideoId(null);
                                   }
-                                } else if (e.key === 'Escape') {
                                   setEditingTagVideoId(null);
-                                }
-                              }}
-                              placeholder="Tag name..."
-                              autoFocus
-                              className={`px-2 py-0.5 text-[10px] font-mono border rounded ${
-                                theme === 'light' ? 'bg-white text-slate-900 border-slate-300' : 'bg-black/40 text-white border-white/20'
-                              } focus:outline-none focus:border-emerald-500 w-20`}
-                            />
+                                }}
+                                className="p-0.5 text-emerald-400 hover:text-emerald-300"
+                              >
+                                <Plus className="w-3 h-3" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setEditingTagVideoId(null)}
+                                className="p-0.5 text-slate-400 hover:text-white"
+                              >
+                                <X className="w-3 h-3" />
+                              </button>
+                            </div>
+                          ) : (
                             <button
                               type="button"
-                              onClick={() => {
-                                if (editingTagValue.trim()) {
-                                  const clean = editingTagValue.trim().toLowerCase().replace(/^#/, '');
-                                  const existing = video.tags || [];
-                                  if (!existing.includes(clean)) {
-                                    handleSaveVideoTags(video.id, [...existing, clean]);
-                                  }
-                                  setEditingTagValue('');
-                                }
-                                setEditingTagVideoId(null);
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                setEditingTagVideoId(video.id);
+                                setEditingTagValue('');
                               }}
-                              className="p-0.5 text-emerald-400 hover:text-emerald-300"
+                              className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-mono ${config.textSecondary} hover:${config.accentColor} hover:bg-white/5 border border-transparent hover:border-white/10 transition-colors`}
+                              title="Add tag to asset"
                             >
-                              <Plus className="w-3 h-3" />
+                              <Tag className="w-2.5 h-2.5" />
+                              <span>+ tag</span>
                             </button>
-                            <button
-                              type="button"
-                              onClick={() => setEditingTagVideoId(null)}
-                              className="p-0.5 text-slate-400 hover:text-white"
-                            >
-                              <X className="w-3 h-3" />
-                            </button>
-                          </div>
-                        ) : (
-                          <button
-                            type="button"
+                          )}
+                        </div>
+                        
+                        {/* Actions */}
+                        <div className="flex items-center gap-3 mt-2 pt-1 border-t border-white/5">
+                          <button 
                             onClick={(e) => {
                               e.preventDefault();
-                              e.stopPropagation();
-                              setEditingTagVideoId(video.id);
-                              setEditingTagValue('');
+                              navigator.clipboard.writeText(`${window.location.origin}/v/${video.id}`);
+                              setCopiedLink(video.id);
+                              toast.success('Link copied to clipboard!', 'Link Copied');
+                              setTimeout(() => setCopiedLink(null), 2000);
                             }}
-                            className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-mono ${config.textSecondary} hover:${config.accentColor} hover:bg-white/5 border border-transparent hover:border-white/10 transition-colors`}
-                            title="Add tag to asset"
+                            className={cn(
+                              "text-[10px] font-mono flex items-center gap-1 transition-colors",
+                              copiedLink === video.id ? `${config.accentColor} font-bold` : `${config.textSecondary} hover:${config.textPrimary}`
+                            )}
                           >
-                            <Tag className="w-2.5 h-2.5" />
-                            <span>+ tag</span>
+                            {copiedLink === video.id ? (
+                              <>
+                                <Check className={`w-3 h-3 ${config.accentColor}`} /> Copied!
+                              </>
+                            ) : (
+                              <>
+                                <Copy className="w-3 h-3" /> Copy Link
+                              </>
+                            )}
                           </button>
-                        )}
-                      </div>
-                      
-                      {/* Actions */}
-                      <div className="flex items-center gap-3 mt-2 pt-1 border-t border-white/5">
-                        <button 
-                          onClick={(e) => {
-                            e.preventDefault();
-                            navigator.clipboard.writeText(`${window.location.origin}/v/${video.id}`);
-                            setCopiedLink(video.id);
-                            toast.success('Link copied to clipboard!', 'Link Copied');
-                            setTimeout(() => setCopiedLink(null), 2000);
-                          }}
-                          className={cn(
-                            "text-[10px] font-mono flex items-center gap-1 transition-colors",
-                            copiedLink === video.id ? `${config.accentColor} font-bold` : `${config.textSecondary} hover:${config.textPrimary}`
-                          )}
-                        >
-                          {copiedLink === video.id ? (
-                            <>
-                              <Check className={`w-3 h-3 ${config.accentColor}`} /> Copied!
-                            </>
-                          ) : (
-                            <>
-                              <Copy className="w-3 h-3" /> Copy Link
-                            </>
-                          )}
-                        </button>
 
-                        <button 
-                          onClick={async (e) => {
-                            e.preventDefault();
-                            if (confirmDelete !== video.id) {
-                              setConfirmDelete(video.id);
-                              setTimeout(() => setConfirmDelete(null), 3000);
-                              return;
-                            }
-                            try {
-                              await fetch(`/api/videos/${video.id}`, { method: 'DELETE' });
-                              const updated = recentVideos.filter(v => v.id !== video.id);
-                              setRecentVideos(updated);
-                              localStorage.setItem('recent_videos', JSON.stringify(updated));
-                              setConfirmDelete(null);
-                              window.dispatchEvent(new Event('videos_updated'));
-                              toast.info(`"${video.originalName}" has been deleted.`, 'Asset Deleted');
-                            } catch(err) {
-                              console.error(err);
-                              toast.error('Failed to delete asset. Please try again.', 'Error');
-                            }
-                          }}
-                          className={cn(
-                            "text-[10px] font-mono flex items-center gap-1 transition-colors ml-auto",
-                            confirmDelete === video.id ? 'text-red-500 font-bold' : 'text-red-400/50 hover:text-red-400'
-                          )}
-                        >
-                          <Trash2 className="w-3 h-3" />
-                          {confirmDelete === video.id ? 'Confirm?' : ''}
-                        </button>
+                          <button 
+                            onClick={async (e) => {
+                              e.preventDefault();
+                              if (confirmDelete !== video.id) {
+                                setConfirmDelete(video.id);
+                                setTimeout(() => setConfirmDelete(null), 3000);
+                                return;
+                              }
+                              try {
+                                await fetch(`/api/videos/${video.id}`, { method: 'DELETE' });
+                                const updated = recentVideos.filter(v => v.id !== video.id);
+                                setRecentVideos(updated);
+                                localStorage.setItem('recent_videos', JSON.stringify(updated));
+                                setConfirmDelete(null);
+                                window.dispatchEvent(new Event('videos_updated'));
+                                toast.info(`"${video.originalName}" has been deleted.`, 'Asset Deleted');
+                              } catch(err) {
+                                console.error(err);
+                                toast.error('Failed to delete asset. Please try again.', 'Error');
+                              }
+                            }}
+                            className={cn(
+                              "text-[10px] font-mono flex items-center gap-1 transition-colors ml-auto",
+                              confirmDelete === video.id ? 'text-red-500 font-bold' : 'text-red-400/50 hover:text-red-400'
+                            )}
+                          >
+                            <Trash2 className="w-3 h-3" />
+                            {confirmDelete === video.id ? 'Confirm?' : ''}
+                          </button>
+                        </div>
                       </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
+                    </motion.div>
+                  ))}
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
         </div>
       </div>
