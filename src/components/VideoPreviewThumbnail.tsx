@@ -79,7 +79,7 @@ export default function VideoPreviewThumbnail({
 
       <video
         ref={videoRef}
-        src={`/uploads/${video.filename}`}
+        src={video.dataUrl || `/uploads/${video.filename}`}
         className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-300 ${isHovered ? 'opacity-100' : 'opacity-30'}`}
         muted
         playsInline

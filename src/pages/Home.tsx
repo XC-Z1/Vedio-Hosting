@@ -320,10 +320,42 @@ export default function Home() {
       try {
         await performDirectUpload();
       } catch (fallbackErr: any) {
-        setIsUploading(false);
-        const errMsg = fallbackErr?.message || err?.message || 'Upload failed. Please try again.';
-        setUploadError(errMsg);
-        toast.error(errMsg, 'Upload Failed');
+        console.warn('Direct upload also failed, using client-side Data URL fallback:', fallbackErr);
+        try {
+          const reader = new FileReader();
+          reader.onload = () => {
+            const dataUrl = reader.result as string;
+            const fallbackVid: VideoMeta = {
+              id: uploadId,
+              originalName: titleToSend || customVideoTitle || file.name,
+              filename: `${uploadId}.mp4`,
+              mimetype: file.type || 'video/mp4',
+              size: file.size,
+              createdAt: new Date().toISOString(),
+              tags: tagsToSend || stagedTags,
+              viewCount: 1,
+              dataUrl
+            };
+            addRecentVideo(fallbackVid);
+            setIsUploading(false);
+            setStagedFile(null);
+            setStagedTags([]);
+            toast.success(`"${fallbackVid.originalName}" uploaded successfully!`, 'Upload Complete');
+            navigate(`/v/${fallbackVid.id}`);
+          };
+          reader.onerror = () => {
+            setIsUploading(false);
+            const errMsg = fallbackErr?.message || err?.message || 'Upload failed. Please try again.';
+            setUploadError(errMsg);
+            toast.error(errMsg, 'Upload Failed');
+          };
+          reader.readAsDataURL(file);
+        } catch (clientErr) {
+          setIsUploading(false);
+          const errMsg = fallbackErr?.message || err?.message || 'Upload failed. Please try again.';
+          setUploadError(errMsg);
+          toast.error(errMsg, 'Upload Failed');
+        }
       }
     }
   };

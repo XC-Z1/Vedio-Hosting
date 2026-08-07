@@ -9,4 +9,5 @@ export interface VideoMeta {
   viewCount?: number;
   duration?: number;
   tags?: string[];
+  dataUrl?: string;
 }

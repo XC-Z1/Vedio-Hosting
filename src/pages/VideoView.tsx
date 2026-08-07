@@ -383,7 +383,7 @@ export default function VideoView() {
             controls
             autoPlay
             playsInline
-            src={`/uploads/${video.filename}`}
+            src={video.dataUrl || `/uploads/${video.filename}`}
             onLoadedMetadata={handleLoadedMetadata}
             onPlay={() => {
               if (videoRef.current) {
