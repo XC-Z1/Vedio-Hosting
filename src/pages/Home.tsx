@@ -39,13 +39,38 @@ export default function Home() {
   const { toast } = useToast();
 
   useEffect(() => {
-    const loadVideos = () => {
+    const loadVideos = async () => {
       const saved = localStorage.getItem('recent_videos');
       if (saved) {
         try {
           setRecentVideos(JSON.parse(saved));
         } catch (e) { }
       }
+
+      try {
+        const res = await fetch('/api/videos');
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data) && data.length > 0) {
+            setRecentVideos(prev => {
+              const map = new Map<string, VideoMeta>();
+              prev.forEach(v => map.set(v.id, v));
+              data.forEach((srv: VideoMeta) => {
+                const existing = map.get(srv.id);
+                map.set(srv.id, {
+                  ...srv,
+                  thumbnailUrl: srv.thumbnailUrl || existing?.thumbnailUrl,
+                  dataUrl: srv.dataUrl || existing?.dataUrl,
+                  duration: srv.duration || existing?.duration
+                });
+              });
+              const merged = Array.from(map.values());
+              localStorage.setItem('recent_videos', JSON.stringify(merged));
+              return merged;
+            });
+          }
+        }
+      } catch (e) { }
     };
     
     loadVideos();
@@ -65,6 +90,23 @@ export default function Home() {
         if (v.id === id && (!v.duration || Math.abs(v.duration - duration) > 0.1)) {
           updated = true;
           return { ...v, duration };
+        }
+        return v;
+      });
+      if (updated) {
+        localStorage.setItem('recent_videos', JSON.stringify(next));
+      }
+      return next;
+    });
+  };
+
+  const handleThumbnailGenerated = (id: string, thumbnailUrl: string) => {
+    setRecentVideos(prev => {
+      let updated = false;
+      const next = prev.map(v => {
+        if (v.id === id && (!v.thumbnailUrl || v.thumbnailUrl !== thumbnailUrl)) {
+          updated = true;
+          return { ...v, thumbnailUrl };
         }
         return v;
       });
@@ -851,6 +893,7 @@ export default function Home() {
                         video={video}
                         onClick={() => navigate(`/v/${video.id}`)}
                         onDurationLoaded={handleDurationLoaded}
+                        onThumbnailGenerated={handleThumbnailGenerated}
                         className="w-full h-28 rounded-xl overflow-hidden shrink-0 mb-2.5"
                       />
 
@@ -951,6 +994,7 @@ export default function Home() {
                         video={video}
                         onClick={() => navigate(`/v/${video.id}`)}
                         onDurationLoaded={handleDurationLoaded}
+                        onThumbnailGenerated={handleThumbnailGenerated}
                         className="w-full sm:w-24 h-24 sm:h-16 rounded-xl overflow-hidden shrink-0"
                       />
                       <div className="flex flex-col justify-center min-w-0 flex-1">
