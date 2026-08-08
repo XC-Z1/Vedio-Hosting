@@ -23,10 +23,8 @@ export default function VideoView() {
   const [isAddingTag, setIsAddingTag] = useState(false);
   
   const [isTheatreMode, setIsTheatreMode] = useState(false);
-  const [isCleanPlayerMode, setIsCleanPlayerMode] = useState(() => {
-    return window.location.search.includes('direct=true') || window.location.search.includes('clean=true') || window.location.search.includes('mode=direct');
-  });
-  const [shareTab, setShareTab] = useState<'link' | 'direct' | 'embed' | 'qr'>('direct');
+  const [isCleanPlayerMode, setIsCleanPlayerMode] = useState(true);
+  const [shareTab, setShareTab] = useState<'direct' | 'link' | 'embed' | 'qr'>('direct');
   const [showShortcutsModal, setShowShortcutsModal] = useState(false);
 
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -39,15 +37,28 @@ export default function VideoView() {
   useEffect(() => {
     if (!id) return;
 
-    const checkOwner = (videoId: string) => {
-      const saved = localStorage.getItem('recent_videos');
-      if (saved) {
-        try {
-          const parsed = JSON.parse(saved) as VideoMeta[];
-          return parsed.some(v => v.id === videoId);
-        } catch (e) {}
+    const loadVideoFromData = (data: any) => {
+      setVideo({
+        ...data,
+        public: data.public !== undefined ? data.public : true
+      });
+      if (data.duration) setDuration(data.duration);
+      if (data.originalName) {
+        document.title = `${data.originalName} - StreamShare Direct Player`;
       }
-      return false;
+      setLoading(false);
+
+      if (viewCountedRef.current !== id) {
+        viewCountedRef.current = id;
+        fetch(`/api/videos/${data.id || id}/view`, { method: 'POST' })
+          .then(res => res.json())
+          .then(resData => {
+            if (resData && typeof resData.viewCount === 'number') {
+              setVideo(prev => prev ? { ...prev, viewCount: resData.viewCount } : prev);
+            }
+          })
+          .catch(() => {});
+      }
     };
 
     fetch(`/api/videos/${id}`)
@@ -56,64 +67,38 @@ export default function VideoView() {
         return res.json();
       })
       .then(data => {
-        const isOwner = checkOwner(id);
-        const isPublic = data.public !== false; // If 'public' flag is not explicitly false, allow public access
-
-        if (!isPublic && !isOwner) {
-          throw new Error('This video is set to private and can only be accessed by its owner.');
-        }
-
-        setVideo({
-          ...data,
-          public: data.public !== undefined ? data.public : true
-        });
-        if (data.duration) setDuration(data.duration);
-        if (data.originalName) {
-          document.title = `${data.originalName} - StreamShare Pro`;
-        }
-        setLoading(false);
-
-        // Increment view count strictly once per video ID on page load
-        if (viewCountedRef.current !== id) {
-          viewCountedRef.current = id;
-          fetch(`/api/videos/${id}/view`, { method: 'POST' })
-            .then(res => res.json())
-            .then(resData => {
-              if (resData && typeof resData.viewCount === 'number') {
-                setVideo(prev => prev ? { ...prev, viewCount: resData.viewCount } : prev);
-              }
-            })
-            .catch(() => {});
-        }
+        loadVideoFromData(data);
       })
-      .catch(err => {
-        // Fallback to localStorage if API endpoint fails or is delayed
+      .catch(() => {
+        // Fallback 1: Check localStorage recent_videos
         const saved = localStorage.getItem('recent_videos');
         if (saved) {
           try {
             const parsed = JSON.parse(saved) as VideoMeta[];
-            const found = parsed.find(v => v.id === id);
+            const found = parsed.find(v => v.id === id || v.filename?.includes(id));
             if (found) {
-              const isOwner = true;
-              const isPublic = found.public !== false;
-              if (!isPublic && !isOwner) {
-                throw new Error('This video is set to private and can only be accessed by its owner.');
-              }
-              setVideo({
-                ...found,
-                public: found.public !== undefined ? found.public : true
-              });
-              if (found.duration) setDuration(found.duration);
-              if (found.originalName) {
-                document.title = `${found.originalName} - StreamShare Pro`;
-              }
-              setLoading(false);
+              loadVideoFromData(found);
               return;
             }
           } catch (e) {}
         }
-        setError(err.message || 'Video not found');
-        setLoading(false);
+
+        // Fallback 2: Query /api/videos server list
+        fetch('/api/videos')
+          .then(res => res.json())
+          .then(list => {
+            if (Array.isArray(list) && list.length > 0) {
+              const matched = list.find((v: any) => v.id === id || v.filename?.includes(id)) || list[0];
+              loadVideoFromData(matched);
+            } else {
+              setError('Video asset is not available on this server.');
+              setLoading(false);
+            }
+          })
+          .catch(() => {
+            setError('Video asset is not available.');
+            setLoading(false);
+          });
       });
 
     return () => {

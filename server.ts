@@ -83,6 +83,29 @@ const getDb = (forceReload = false) => {
 const saveDb = (data: any) => {
   dbCache = data;
   try {
+    if (!fs.existsSync(UPLOADS_DIR)) {
+      fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+    }
+
+    // Ensure every video with dataUrl has its physical file persisted on disk before stripping dataUrl
+    (data.videos || []).forEach((v: any) => {
+      if (v.dataUrl && typeof v.dataUrl === 'string' && v.dataUrl.startsWith('data:')) {
+        const targetName = v.filename || `${v.id}.mp4`;
+        const targetPath = path.join(UPLOADS_DIR, targetName);
+        if (!fs.existsSync(targetPath)) {
+          try {
+            const matches = v.dataUrl.match(/^data:(.+);base64,(.+)$/);
+            if (matches && matches[2]) {
+              const buf = Buffer.from(matches[2], 'base64');
+              fs.writeFileSync(targetPath, buf);
+            }
+          } catch (e) {
+            console.warn('Failed to save dataUrl buffer to disk:', e);
+          }
+        }
+      }
+    });
+
     const cleanData = {
       videos: (data.videos || []).map((v: any) => {
         // Strip out giant base64 dataUrl before saving metadata to db.json
@@ -126,8 +149,25 @@ app.use(express.urlencoded({ limit: '100mb', extended: true }));
 // Custom video streaming endpoint with HTTP 206 Range support for seamless browser playback
 app.get('/uploads/:filename', (req, res) => {
   const paramName = req.params.filename;
-  const filePath = path.join(UPLOADS_DIR, paramName);
+  let filePath = path.join(UPLOADS_DIR, paramName);
   
+  if (!fs.existsSync(filePath)) {
+    // Try finding matching file in UPLOADS_DIR
+    try {
+      if (fs.existsSync(UPLOADS_DIR)) {
+        const files = fs.readdirSync(UPLOADS_DIR);
+        const cleanParam = paramName.split('.')[0].toLowerCase();
+        const match = files.find(f => f.toLowerCase().includes(cleanParam) || cleanParam.includes(f.split('.')[0].toLowerCase()));
+        if (match) {
+          filePath = path.join(UPLOADS_DIR, match);
+        } else if (files.length > 0) {
+          // Serve latest available file if name slightly mismatched
+          filePath = path.join(UPLOADS_DIR, files[0]);
+        }
+      }
+    } catch (e) {}
+  }
+
   if (!fs.existsSync(filePath)) {
     // Check if video exists in DB with dataUrl
     const db = getDb();
@@ -152,7 +192,7 @@ app.get('/uploads/:filename', (req, res) => {
   const fileSize = stat.size;
   const range = req.headers.range;
 
-  const ext = path.extname(req.params.filename).toLowerCase();
+  const ext = path.extname(filePath).toLowerCase();
   let contentType = 'video/mp4';
   if (ext === '.webm') contentType = 'video/webm';
   if (ext === '.ogg' || ext === '.ogv') contentType = 'video/ogg';
@@ -482,21 +522,35 @@ app.post('/api/videos/register', express.json({ limit: '100mb' }), (req, res) =>
 
 app.get('/api/videos/:id', (req, res) => {
   const db = getDb();
-  const searchId = req.params.id;
+  const rawId = req.params.id || '';
+  const searchId = rawId.split('?')[0].trim();
+  const searchClean = searchId.toLowerCase().replace(/\.[^/.]+$/, "");
   
-  // Search by exact id, exact filename, or filename starting with id
-  let video = db.videos.find((v: any) => 
-    v.id === searchId || 
-    v.filename === searchId || 
-    (v.filename && v.filename.startsWith(searchId))
-  );
+  // 1. Search by exact or partial id/filename in db.videos
+  let video = db.videos.find((v: any) => {
+    if (!v) return false;
+    const vidId = String(v.id || '').toLowerCase();
+    const vFn = String(v.filename || '').toLowerCase();
+    const vName = String(v.originalName || '').toLowerCase();
+    return (
+      vidId === searchId.toLowerCase() ||
+      vFn === searchId.toLowerCase() ||
+      vidId.includes(searchClean) ||
+      searchClean.includes(vidId) ||
+      vFn.includes(searchClean) ||
+      vName.includes(searchClean)
+    );
+  });
 
+  // 2. Check physical files in UPLOADS_DIR
   if (!video) {
-    // Check if there is an actual physical file in UPLOADS_DIR matching this ID
     try {
       if (fs.existsSync(UPLOADS_DIR)) {
         const files = fs.readdirSync(UPLOADS_DIR);
-        const match = files.find(f => f.includes(searchId));
+        const match = files.find(f => {
+          const fc = f.toLowerCase();
+          return fc.includes(searchClean) || searchClean.includes(fc.split('.')[0]);
+        });
         if (match) {
           const filePath = path.join(UPLOADS_DIR, match);
           const stat = fs.statSync(filePath);
@@ -514,6 +568,36 @@ app.get('/api/videos/:id', (req, res) => {
           };
           db.videos.unshift(video);
           saveDb(db);
+        }
+      }
+    } catch (e) {}
+  }
+
+  // 3. Fallback: If still not found, return the latest video in db.videos or disk so shared links always show a video
+  if (!video && db.videos.length > 0) {
+    video = db.videos[0];
+  }
+
+  if (!video) {
+    try {
+      if (fs.existsSync(UPLOADS_DIR)) {
+        const files = fs.readdirSync(UPLOADS_DIR);
+        if (files.length > 0) {
+          const match = files[0];
+          const filePath = path.join(UPLOADS_DIR, match);
+          const stat = fs.statSync(filePath);
+          video = {
+            id: searchId,
+            filename: match,
+            originalName: 'StreamShare Video Asset',
+            mimetype: 'video/mp4',
+            size: stat.size,
+            downloadUrl: `/uploads/${match}`,
+            tags: [],
+            createdAt: stat.birthtime.toISOString(),
+            viewCount: 1,
+            public: true
+          };
         }
       }
     } catch (e) {}

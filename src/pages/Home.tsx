@@ -944,9 +944,9 @@ export default function Home() {
                           <button 
                             onClick={(e) => {
                               e.preventDefault();
-                              navigator.clipboard.writeText(`${window.location.origin}/v/${video.id}`);
+                              navigator.clipboard.writeText(`${window.location.origin}/v/${video.id}?direct=true`);
                               setCopiedLink(video.id);
-                              toast.success('Link copied to clipboard!', 'Link Copied');
+                              toast.success('Direct video link copied!', 'Link Copied');
                               setTimeout(() => setCopiedLink(null), 2000);
                             }}
                             className={`text-[10px] font-mono flex items-center gap-1 ${
@@ -1126,9 +1126,9 @@ export default function Home() {
                           <button 
                             onClick={(e) => {
                               e.preventDefault();
-                              navigator.clipboard.writeText(`${window.location.origin}/v/${video.id}`);
+                              navigator.clipboard.writeText(`${window.location.origin}/v/${video.id}?direct=true`);
                               setCopiedLink(video.id);
-                              toast.success('Link copied to clipboard!', 'Link Copied');
+                              toast.success('Direct video link copied!', 'Link Copied');
                               setTimeout(() => setCopiedLink(null), 2000);
                             }}
                             className={cn(

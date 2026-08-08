@@ -98,9 +98,9 @@ export default function App() {
 
   const [copiedApp, setCopiedApp] = useState<string | null>(null);
   const handleCopyLink = (id: string) => {
-    navigator.clipboard.writeText(`${window.location.origin}/v/${id}`);
+    navigator.clipboard.writeText(`${window.location.origin}/v/${id}?direct=true`);
     setCopiedApp(id);
-    toast.success('Direct link copied to clipboard!', 'Link Copied');
+    toast.success('Direct video link copied to clipboard!', 'Link Copied');
     setTimeout(() => setCopiedApp(null), 2000);
   };
 
