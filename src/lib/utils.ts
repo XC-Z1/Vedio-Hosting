@@ -23,10 +23,7 @@ export function formatDuration(seconds?: number): string {
 }
 
 export function getShareableVideoUrl(videoId: string, direct = true): string {
-  let origin = window.location.origin;
-  if (origin.includes('ais-dev-')) {
-    origin = origin.replace('ais-dev-', 'ais-pre-');
-  }
+  const origin = window.location.origin;
   return `${origin}/v/${videoId}${direct ? '?direct=true' : ''}`;
 }
 

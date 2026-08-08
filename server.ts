@@ -551,7 +551,7 @@ app.post('/api/videos/register', express.json({ limit: '100mb' }), (req, res) =>
 });
 
 app.get('/api/videos/:id', (req, res) => {
-  const db = getDb();
+  const db = getDb(true);
   const rawId = req.params.id || '';
   const searchId = rawId.split('?')[0].trim();
   const searchClean = searchId.toLowerCase().replace(/\.[^/.]+$/, "");
