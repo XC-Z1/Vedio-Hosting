@@ -182,17 +182,17 @@ app.get('/uploads/:filename', (req, res) => {
   let filePath = path.join(UPLOADS_DIR, paramName);
   
   if (!fs.existsSync(filePath)) {
-    // Try finding matching file in UPLOADS_DIR
+    // Try finding exact matching file in UPLOADS_DIR
     try {
       if (fs.existsSync(UPLOADS_DIR)) {
         const files = fs.readdirSync(UPLOADS_DIR);
         const cleanParam = paramName.split('.')[0].toLowerCase();
-        const match = files.find(f => f.toLowerCase().includes(cleanParam) || cleanParam.includes(f.split('.')[0].toLowerCase()));
+        const match = files.find(f => {
+          const fc = f.toLowerCase();
+          return fc === cleanParam || fc.startsWith(cleanParam) || cleanParam.startsWith(fc.split('.')[0]);
+        });
         if (match) {
           filePath = path.join(UPLOADS_DIR, match);
-        } else if (files.length > 0) {
-          // Serve latest available file if name slightly mismatched
-          filePath = path.join(UPLOADS_DIR, files[0]);
         }
       }
     } catch (e) {}
@@ -556,30 +556,27 @@ app.get('/api/videos/:id', (req, res) => {
   const searchId = rawId.split('?')[0].trim();
   const searchClean = searchId.toLowerCase().replace(/\.[^/.]+$/, "");
   
-  // 1. Search by exact or partial id/filename in db.videos
+  // 1. Search by exact ID or matching filename in db.videos
   let video = db.videos.find((v: any) => {
     if (!v) return false;
     const vidId = String(v.id || '').toLowerCase();
     const vFn = String(v.filename || '').toLowerCase();
-    const vName = String(v.originalName || '').toLowerCase();
     return (
       vidId === searchId.toLowerCase() ||
       vFn === searchId.toLowerCase() ||
-      vidId.includes(searchClean) ||
-      searchClean.includes(vidId) ||
-      vFn.includes(searchClean) ||
-      vName.includes(searchClean)
+      vidId === searchClean ||
+      vFn === searchClean
     );
   });
 
-  // 2. Check physical files in UPLOADS_DIR
+  // 2. Check physical files in UPLOADS_DIR matching this specific searchId
   if (!video) {
     try {
       if (fs.existsSync(UPLOADS_DIR)) {
         const files = fs.readdirSync(UPLOADS_DIR);
         const match = files.find(f => {
           const fc = f.toLowerCase();
-          return fc.includes(searchClean) || searchClean.includes(fc.split('.')[0]);
+          return fc === searchClean || fc.startsWith(searchClean) || searchClean === fc.split('.')[0];
         });
         if (match) {
           const filePath = path.join(UPLOADS_DIR, match);
@@ -603,52 +600,8 @@ app.get('/api/videos/:id', (req, res) => {
     } catch (e) {}
   }
 
-  // 3. Fallback: If still not found, return the latest video in db.videos or disk so shared links always show a video
-  if (!video && db.videos.length > 0) {
-    video = db.videos[0];
-  }
-
   if (!video) {
-    try {
-      if (fs.existsSync(UPLOADS_DIR)) {
-        const files = fs.readdirSync(UPLOADS_DIR);
-        if (files.length > 0) {
-          const match = files[0];
-          const filePath = path.join(UPLOADS_DIR, match);
-          const stat = fs.statSync(filePath);
-          video = {
-            id: searchId,
-            filename: match,
-            originalName: 'StreamShare Video Asset',
-            mimetype: 'video/mp4',
-            size: stat.size,
-            downloadUrl: `/uploads/${match}`,
-            tags: [],
-            createdAt: stat.birthtime.toISOString(),
-            viewCount: 1,
-            public: true
-          };
-        }
-      }
-    } catch (e) {}
-  }
-
-  if (!video) {
-    // Dynamic fallback video so NO shared video link EVER fails with 404
-    video = {
-      id: searchId || 'v_stream',
-      originalName: `Shared Stream Video (${searchId || 'Asset'})`,
-      filename: `sample_${searchId}.mp4`,
-      mimetype: 'video/mp4',
-      size: 15800000,
-      downloadUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
-      tags: ['stream', 'video'],
-      createdAt: new Date().toISOString(),
-      viewCount: 1,
-      public: true
-    };
-    db.videos.unshift(video);
-    saveDb(db);
+    return res.status(404).json({ error: 'Video asset not found' });
   }
   
   res.json({

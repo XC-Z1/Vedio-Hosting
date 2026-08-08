@@ -61,19 +61,6 @@ export default function VideoView() {
       }
     };
 
-    const fallbackVideo = {
-      id: id || 'v_shared',
-      originalName: 'StreamShare Direct Video',
-      filename: 'video.mp4',
-      mimetype: 'video/mp4',
-      size: 15800000,
-      downloadUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
-      tags: ['stream', 'video'],
-      createdAt: new Date().toISOString(),
-      viewCount: 1,
-      public: true
-    };
-
     fetch(`/api/videos/${id}`)
       .then(res => {
         if (!res.ok) throw new Error('Video not found');
@@ -87,36 +74,21 @@ export default function VideoView() {
         }
       })
       .catch(() => {
-        // Fallback 1: Check localStorage recent_videos
+        // Fallback: Check localStorage recent_videos strictly for this video ID
         const saved = localStorage.getItem('recent_videos');
         if (saved) {
           try {
             const parsed = JSON.parse(saved) as VideoMeta[];
-            const found = parsed.find(v => v.id === id || v.filename?.includes(id));
+            const found = parsed.find(v => v.id === id || v.filename === id || (v.filename && v.filename.includes(id)));
             if (found) {
               loadVideoFromData(found);
-              return;
-            } else if (parsed.length > 0) {
-              loadVideoFromData(parsed[0]);
               return;
             }
           } catch (e) {}
         }
 
-        // Fallback 2: Query /api/videos server list
-        fetch('/api/videos')
-          .then(res => res.json())
-          .then(list => {
-            if (Array.isArray(list) && list.length > 0) {
-              const matched = list.find((v: any) => v.id === id || v.filename?.includes(id)) || list[0];
-              loadVideoFromData(matched);
-            } else {
-              loadVideoFromData(fallbackVideo);
-            }
-          })
-          .catch(() => {
-            loadVideoFromData(fallbackVideo);
-          });
+        setError('This video link is invalid or the video has been removed.');
+        setLoading(false);
       });
 
     return () => {
@@ -444,11 +416,7 @@ export default function VideoView() {
             src={video.dataUrl || video.downloadUrl || `/uploads/${video.filename}`}
             onLoadedMetadata={handleLoadedMetadata}
             onError={(e) => {
-              console.warn('Video playback source failed, switching to high-reliability backup stream:', e);
-              if (videoRef.current && videoRef.current.src !== 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4') {
-                videoRef.current.src = 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4';
-                videoRef.current.play().catch(() => {});
-              }
+              console.warn('Video playback source warning:', e);
             }}
             onPlay={() => {
               if (videoRef.current) {
