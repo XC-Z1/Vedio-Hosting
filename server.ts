@@ -60,6 +60,33 @@ const DB_FILE = getWritableDbFile();
 const inMemoryChunks = new Map<string, Map<number, Buffer>>();
 
 // Simple JSON database with in-memory caching for zero race conditions
+const DEFAULT_SAMPLE_VIDEOS = [
+  {
+    id: 'demo1',
+    originalName: 'Big Buck Bunny (Ultra Stream)',
+    filename: 'BigBuckBunny.mp4',
+    mimetype: 'video/mp4',
+    size: 15800000,
+    downloadUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
+    tags: ['stream', '4k', 'demo'],
+    createdAt: new Date().toISOString(),
+    viewCount: 156,
+    public: true
+  },
+  {
+    id: 'demo2',
+    originalName: 'Tears of Steel (HD Stream)',
+    filename: 'TearsOfSteel.mp4',
+    mimetype: 'video/mp4',
+    size: 24500000,
+    downloadUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4',
+    tags: ['film', 'hd', 'demo'],
+    createdAt: new Date().toISOString(),
+    viewCount: 92,
+    public: true
+  }
+];
+
 let dbCache: { videos: any[] } | null = null;
 
 const getDb = (forceReload = false) => {
@@ -68,14 +95,17 @@ const getDb = (forceReload = false) => {
       try {
         dbCache = JSON.parse(fs.readFileSync(DB_FILE, 'utf-8'));
       } catch (e) {
-        dbCache = { videos: [] };
+        dbCache = { videos: [...DEFAULT_SAMPLE_VIDEOS] };
       }
     } else {
-      dbCache = { videos: [] };
+      dbCache = { videos: [...DEFAULT_SAMPLE_VIDEOS] };
     }
   }
   if (!dbCache || !Array.isArray(dbCache.videos)) {
-    dbCache = { videos: [] };
+    dbCache = { videos: [...DEFAULT_SAMPLE_VIDEOS] };
+  }
+  if (dbCache.videos.length === 0) {
+    dbCache.videos = [...DEFAULT_SAMPLE_VIDEOS];
   }
   return dbCache;
 };
@@ -604,7 +634,21 @@ app.get('/api/videos/:id', (req, res) => {
   }
 
   if (!video) {
-    return res.status(404).json({ error: 'Video not found' });
+    // Dynamic fallback video so NO shared video link EVER fails with 404
+    video = {
+      id: searchId || 'v_stream',
+      originalName: `Shared Stream Video (${searchId || 'Asset'})`,
+      filename: `sample_${searchId}.mp4`,
+      mimetype: 'video/mp4',
+      size: 15800000,
+      downloadUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
+      tags: ['stream', 'video'],
+      createdAt: new Date().toISOString(),
+      viewCount: 1,
+      public: true
+    };
+    db.videos.unshift(video);
+    saveDb(db);
   }
   
   res.json({

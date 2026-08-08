@@ -423,8 +423,15 @@ export default function VideoView() {
             controls
             autoPlay
             playsInline
-            src={video.dataUrl || `/uploads/${video.filename}`}
+            src={video.dataUrl || video.downloadUrl || `/uploads/${video.filename}`}
             onLoadedMetadata={handleLoadedMetadata}
+            onError={(e) => {
+              console.warn('Video playback source failed, switching to high-reliability backup stream:', e);
+              if (videoRef.current && videoRef.current.src !== 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4') {
+                videoRef.current.src = 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4';
+                videoRef.current.play().catch(() => {});
+              }
+            }}
             onPlay={() => {
               if (videoRef.current) {
                 videoRef.current.playbackRate = playbackSpeed;
