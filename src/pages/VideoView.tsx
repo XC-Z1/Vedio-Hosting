@@ -440,30 +440,15 @@ export default function VideoView() {
         </div>
 
         {/* Cinema Video Container */}
-        <div className={`relative ${isTheatreMode ? 'aspect-[21/9]' : 'aspect-video'} ${theme === 'light' ? 'bg-slate-900' : 'bg-[#030508]'} rounded-3xl overflow-hidden border ${config.borderClass} shadow-2xl group transition-all duration-300`}>
-          <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent pointer-events-none z-10" />
+        <div className={`relative ${isTheatreMode ? 'aspect-[21/9]' : 'aspect-video'} ${theme === 'light' ? 'bg-slate-900' : 'bg-[#030508]'} rounded-3xl overflow-hidden border ${config.borderClass} shadow-2xl transition-all duration-300`}>
           <video 
             ref={videoRef}
             className="w-full h-full object-contain relative z-20 cursor-pointer"
             controls
-            autoPlay
             playsInline
+            preload="metadata"
             src={video.dataUrl || video.downloadUrl || `/uploads/${video.filename}`}
             onLoadedMetadata={handleLoadedMetadata}
-            onCanPlay={() => {
-              if (videoRef.current) {
-                videoRef.current.play().catch(() => {
-                  // If browser blocked unmuted autoplay, try muted autoplay
-                  if (videoRef.current) {
-                    videoRef.current.muted = true;
-                    videoRef.current.play().catch(() => {});
-                  }
-                });
-              }
-            }}
-            onError={(e) => {
-              console.warn('Video playback source warning:', e);
-            }}
             onPlay={() => {
               setIsPlaying(true);
               if (videoRef.current) {
@@ -471,29 +456,12 @@ export default function VideoView() {
               }
             }}
             onPause={() => setIsPlaying(false)}
+            onError={(e) => {
+              console.warn('Video playback source warning:', e);
+            }}
           >
             Your browser does not support the video tag.
           </video>
-
-          {!isPlaying && (
-            <div 
-              onClick={() => {
-                if (videoRef.current) {
-                  videoRef.current.muted = false;
-                  videoRef.current.play().catch(() => {});
-                }
-              }}
-              className="absolute inset-0 z-30 flex items-center justify-center bg-black/40 backdrop-blur-[2px] cursor-pointer group-hover:bg-black/30 transition-all"
-            >
-              <div className="flex flex-col items-center gap-3 bg-black/80 text-white px-8 py-5 rounded-3xl border border-[#00FF88]/40 shadow-2xl shadow-[#00FF88]/20 group-hover:scale-105 transition-transform">
-                <div className="w-16 h-16 rounded-full bg-[#00FF88] flex items-center justify-center text-slate-950 shadow-lg">
-                  <Film className="w-8 h-8 translate-x-0.5" />
-                </div>
-                <span className="font-bold text-sm tracking-wide">Click to Play Video</span>
-                <span className="text-[11px] text-white/60 font-mono">StreamShare Direct Stream</span>
-              </div>
-            </div>
-          )}
         </div>
 
         {/* Pro Playback Controls Bar */}
