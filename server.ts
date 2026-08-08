@@ -127,11 +127,15 @@ function streamBufferWithRange(req: express.Request, res: express.Response, buff
   if (range) {
     const parts = range.replace(/bytes=/, "").split("-");
     const start = parseInt(parts[0], 10);
-    const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+    let end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
 
-    if (isNaN(start) || start >= fileSize || (parts[1] && parseInt(parts[1], 10) >= fileSize)) {
+    if (isNaN(start) || start < 0 || start >= fileSize) {
       res.status(416).setHeader('Content-Range', `bytes */${fileSize}`);
       return res.end();
+    }
+
+    if (isNaN(end) || end >= fileSize) {
+      end = fileSize - 1;
     }
 
     const chunksize = (end - start) + 1;
@@ -178,11 +182,15 @@ function streamFileFromDisk(req: express.Request, res: express.Response, filePat
   if (range) {
     const parts = range.replace(/bytes=/, "").split("-");
     const start = parseInt(parts[0], 10);
-    const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+    let end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
 
-    if (isNaN(start) || start >= fileSize || (parts[1] && parseInt(parts[1], 10) >= fileSize)) {
+    if (isNaN(start) || start < 0 || start >= fileSize) {
       res.status(416).setHeader('Content-Range', `bytes */${fileSize}`);
       return res.end();
+    }
+
+    if (isNaN(end) || end >= fileSize) {
+      end = fileSize - 1;
     }
 
     const chunksize = (end - start) + 1;
