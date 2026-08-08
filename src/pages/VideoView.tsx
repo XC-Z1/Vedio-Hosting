@@ -27,6 +27,7 @@ export default function VideoView() {
   const [shareTab, setShareTab] = useState<'direct' | 'link' | 'embed' | 'qr'>('direct');
   const [showShortcutsModal, setShowShortcutsModal] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [activeVideoSrc, setActiveVideoSrc] = useState<string>('');
 
   const videoRef = useRef<HTMLVideoElement>(null);
 
@@ -34,6 +35,24 @@ export default function VideoView() {
   const { toast } = useToast();
 
   const viewCountedRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (video) {
+      const initialSrc = video.downloadUrl || `/uploads/${video.filename}` || video.dataUrl || '/api/sample-video';
+      setActiveVideoSrc(initialSrc);
+    }
+  }, [video]);
+
+  const handleVideoError = () => {
+    if (!video) return;
+    if (activeVideoSrc !== video.dataUrl && video.dataUrl) {
+      setActiveVideoSrc(video.dataUrl);
+    } else if (activeVideoSrc !== `/uploads/${video.filename}` && video.filename) {
+      setActiveVideoSrc(`/uploads/${video.filename}`);
+    } else if (activeVideoSrc !== '/api/sample-video') {
+      setActiveVideoSrc('/api/sample-video');
+    }
+  };
 
   useEffect(() => {
     if (!id) return;
@@ -183,6 +202,10 @@ export default function VideoView() {
 
   const handleTogglePiP = async () => {
     if (!videoRef.current) return;
+    if (!document.pictureInPictureEnabled) {
+      toast.info('Picture-in-Picture mode is not supported in this browser.', 'PiP Notice');
+      return;
+    }
     try {
       if (document.pictureInPictureElement) {
         await document.exitPictureInPicture();
@@ -190,7 +213,7 @@ export default function VideoView() {
         await videoRef.current.requestPictureInPicture();
       }
     } catch (e) {
-      toast.error('Picture-in-Picture is not supported in this browser environment', 'PiP Unavailable');
+      toast.info('Picture-in-Picture mode not supported or was cancelled.', 'PiP Notice');
     }
   };
 
@@ -446,8 +469,8 @@ export default function VideoView() {
             className="w-full h-full object-contain relative z-20 cursor-pointer"
             controls
             playsInline
-            preload="metadata"
-            src={video.dataUrl || video.downloadUrl || `/uploads/${video.filename}`}
+            preload="auto"
+            src={activeVideoSrc || video.downloadUrl || `/uploads/${video.filename}` || '/api/sample-video'}
             onLoadedMetadata={handleLoadedMetadata}
             onPlay={() => {
               setIsPlaying(true);
@@ -456,9 +479,7 @@ export default function VideoView() {
               }
             }}
             onPause={() => setIsPlaying(false)}
-            onError={(e) => {
-              console.warn('Video playback source warning:', e);
-            }}
+            onError={handleVideoError}
           >
             Your browser does not support the video tag.
           </video>

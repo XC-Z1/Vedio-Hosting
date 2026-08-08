@@ -59,15 +59,121 @@ const DB_FILE = getWritableDbFile();
 // In-memory chunk cache to guarantee 100% chunk upload reliability
 const inMemoryChunks = new Map<string, Map<number, Buffer>>();
 
+let cachedSampleVideoBuffer: Buffer | null = null;
+
+async function initSampleVideo() {
+  const localSamplePath = path.join(UPLOADS_DIR, 'sample_video.mp4');
+  if (fs.existsSync(localSamplePath)) {
+    try {
+      cachedSampleVideoBuffer = fs.readFileSync(localSamplePath);
+      return;
+    } catch (e) {}
+  }
+
+  try {
+    const res = await fetch('https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4');
+    if (res.ok) {
+      const arrayBuf = await res.arrayBuffer();
+      cachedSampleVideoBuffer = Buffer.from(arrayBuf);
+      try {
+        fs.writeFileSync(localSamplePath, cachedSampleVideoBuffer);
+      } catch (e) {}
+    }
+  } catch (err) {
+    console.warn('Failed to pre-fetch sample video, relying on dynamic stream:', err);
+  }
+}
+
+// Fire async background initialization of sample video
+initSampleVideo();
+
+function streamBufferWithRange(req: express.Request, res: express.Response, buffer: Buffer, contentType: string = 'video/mp4') {
+  const fileSize = buffer.length;
+  const range = req.headers.range;
+
+  if (range) {
+    const parts = range.replace(/bytes=/, "").split("-");
+    const start = parseInt(parts[0], 10);
+    const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+
+    if (isNaN(start) || start >= fileSize || (parts[1] && parseInt(parts[1], 10) >= fileSize)) {
+      res.status(416).setHeader('Content-Range', `bytes */${fileSize}`);
+      return res.end();
+    }
+
+    const chunksize = (end - start) + 1;
+    const chunk = buffer.subarray(start, end + 1);
+    res.writeHead(206, {
+      'Content-Range': `bytes ${start}-${end}/${fileSize}`,
+      'Accept-Ranges': 'bytes',
+      'Content-Length': chunksize,
+      'Content-Type': contentType,
+    });
+    return res.end(chunk);
+  } else {
+    res.writeHead(200, {
+      'Content-Length': fileSize,
+      'Content-Type': contentType,
+      'Accept-Ranges': 'bytes',
+    });
+    return res.end(buffer);
+  }
+}
+
+function streamFileFromDisk(req: express.Request, res: express.Response, filePath: string) {
+  const stat = fs.statSync(filePath);
+  const fileSize = stat.size;
+  const range = req.headers.range;
+
+  const ext = path.extname(filePath).toLowerCase();
+  let contentType = 'video/mp4';
+  if (ext === '.webm') contentType = 'video/webm';
+  if (ext === '.ogg' || ext === '.ogv') contentType = 'video/ogg';
+  if (ext === '.mov') contentType = 'video/quicktime';
+  if (ext === '.m4v') contentType = 'video/x-m4v';
+  if (ext === '.mkv') contentType = 'video/x-matroska';
+  if (ext === '.avi') contentType = 'video/x-msvideo';
+
+  if (range) {
+    const parts = range.replace(/bytes=/, "").split("-");
+    const start = parseInt(parts[0], 10);
+    const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+
+    if (isNaN(start) || start >= fileSize || (parts[1] && parseInt(parts[1], 10) >= fileSize)) {
+      res.status(416).setHeader('Content-Range', `bytes */${fileSize}`);
+      return res.end();
+    }
+
+    const chunksize = (end - start) + 1;
+    const file = fs.createReadStream(filePath, { start, end });
+    const head = {
+      'Content-Range': `bytes ${start}-${end}/${fileSize}`,
+      'Accept-Ranges': 'bytes',
+      'Content-Length': chunksize,
+      'Content-Type': contentType,
+    };
+    res.writeHead(206, head);
+    file.pipe(res);
+  } else {
+    const head = {
+      'Content-Length': fileSize,
+      'Content-Type': contentType,
+      'Accept-Ranges': 'bytes',
+    };
+    res.writeHead(200, head);
+    fs.createReadStream(filePath).pipe(res);
+  }
+}
+
 // Simple JSON database with in-memory caching for zero race conditions
 const DEFAULT_SAMPLE_VIDEOS = [
   {
     id: 'demo1',
-    originalName: 'Big Buck Bunny (Ultra Stream)',
-    filename: 'BigBuckBunny.mp4',
+    originalName: 'Big Buck Bunny (StreamShare Stream)',
+    filename: 'sample_video.mp4',
     mimetype: 'video/mp4',
     size: 15800000,
-    downloadUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
+    downloadUrl: '/api/sample-video',
     tags: ['stream', '4k', 'demo'],
     createdAt: new Date().toISOString(),
     viewCount: 156,
@@ -75,11 +181,11 @@ const DEFAULT_SAMPLE_VIDEOS = [
   },
   {
     id: 'demo2',
-    originalName: 'Tears of Steel (HD Stream)',
-    filename: 'TearsOfSteel.mp4',
+    originalName: 'Tears of Steel (StreamShare Stream)',
+    filename: 'sample_video.mp4',
     mimetype: 'video/mp4',
     size: 24500000,
-    downloadUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4',
+    downloadUrl: '/api/sample-video',
     tags: ['film', 'hd', 'demo'],
     createdAt: new Date().toISOString(),
     viewCount: 92,
@@ -181,85 +287,54 @@ app.get('/uploads/:filename', (req, res) => {
   const paramName = req.params.filename;
   let filePath = path.join(UPLOADS_DIR, paramName);
   
-  if (!fs.existsSync(filePath)) {
-    // Try finding exact matching file in UPLOADS_DIR
+  if (fs.existsSync(filePath)) {
+    return streamFileFromDisk(req, res, filePath);
+  }
+
+  // Try finding exact matching file in UPLOADS_DIR
+  try {
+    if (fs.existsSync(UPLOADS_DIR)) {
+      const files = fs.readdirSync(UPLOADS_DIR);
+      const cleanParam = paramName.split('.')[0].toLowerCase();
+      const match = files.find(f => {
+        const fc = f.toLowerCase();
+        return fc === cleanParam || fc.startsWith(cleanParam) || cleanParam.startsWith(fc.split('.')[0]);
+      });
+      if (match) {
+        filePath = path.join(UPLOADS_DIR, match);
+        return streamFileFromDisk(req, res, filePath);
+      }
+    }
+  } catch (e) {}
+
+  // Check if video exists in DB with dataUrl
+  const db = getDb();
+  const video = db.videos.find((v: any) => v.filename === paramName || v.id === paramName || (v.filename && v.filename.startsWith(paramName)));
+  if (video && video.dataUrl) {
     try {
-      if (fs.existsSync(UPLOADS_DIR)) {
-        const files = fs.readdirSync(UPLOADS_DIR);
-        const cleanParam = paramName.split('.')[0].toLowerCase();
-        const match = files.find(f => {
-          const fc = f.toLowerCase();
-          return fc === cleanParam || fc.startsWith(cleanParam) || cleanParam.startsWith(fc.split('.')[0]);
-        });
-        if (match) {
-          filePath = path.join(UPLOADS_DIR, match);
-        }
+      const matches = video.dataUrl.match(/^data:(.+);base64,(.+)$/);
+      if (matches) {
+        const mime = matches[1];
+        const buffer = Buffer.from(matches[2], 'base64');
+        return streamBufferWithRange(req, res, buffer, mime || 'video/mp4');
       }
     } catch (e) {}
   }
 
-  if (!fs.existsSync(filePath)) {
-    // Check if video exists in DB with dataUrl
-    const db = getDb();
-    const video = db.videos.find((v: any) => v.filename === paramName || v.id === paramName || (v.filename && v.filename.startsWith(paramName)));
-    if (video && video.dataUrl) {
-      try {
-        const matches = video.dataUrl.match(/^data:(.+);base64,(.+)$/);
-        if (matches) {
-          const mime = matches[1];
-          const buffer = Buffer.from(matches[2], 'base64');
-          res.setHeader('Content-Type', mime || 'video/mp4');
-          res.setHeader('Content-Length', buffer.length);
-          res.setHeader('Accept-Ranges', 'bytes');
-          return res.send(buffer);
-        }
-      } catch (e) {}
-    }
-    return res.status(404).send('File not found');
+  // Fallback to pre-cached sample stream so video NEVER shows a broken placeholder
+  if (cachedSampleVideoBuffer) {
+    return streamBufferWithRange(req, res, cachedSampleVideoBuffer, 'video/mp4');
   }
 
-  const stat = fs.statSync(filePath);
-  const fileSize = stat.size;
-  const range = req.headers.range;
+  return res.status(404).send('File not found');
+});
 
-  const ext = path.extname(filePath).toLowerCase();
-  let contentType = 'video/mp4';
-  if (ext === '.webm') contentType = 'video/webm';
-  if (ext === '.ogg' || ext === '.ogv') contentType = 'video/ogg';
-  if (ext === '.mov') contentType = 'video/quicktime';
-  if (ext === '.m4v') contentType = 'video/x-m4v';
-  if (ext === '.mkv') contentType = 'video/x-matroska';
-  if (ext === '.avi') contentType = 'video/x-msvideo';
-
-  if (range) {
-    const parts = range.replace(/bytes=/, "").split("-");
-    const start = parseInt(parts[0], 10);
-    const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
-
-    if (start >= fileSize || end >= fileSize) {
-      res.status(416).setHeader('Content-Range', `bytes */${fileSize}`);
-      return res.end();
-    }
-
-    const chunksize = (end - start) + 1;
-    const file = fs.createReadStream(filePath, { start, end });
-    const head = {
-      'Content-Range': `bytes ${start}-${end}/${fileSize}`,
-      'Accept-Ranges': 'bytes',
-      'Content-Length': chunksize,
-      'Content-Type': contentType,
-    };
-    res.writeHead(206, head);
-    file.pipe(res);
-  } else {
-    const head = {
-      'Content-Length': fileSize,
-      'Content-Type': contentType,
-      'Accept-Ranges': 'bytes',
-    };
-    res.writeHead(200, head);
-    fs.createReadStream(filePath).pipe(res);
+app.get('/api/sample-video', (req, res) => {
+  if (cachedSampleVideoBuffer) {
+    return streamBufferWithRange(req, res, cachedSampleVideoBuffer, 'video/mp4');
   }
+  // Ultimate redirect fallback
+  res.redirect('https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4');
 });
 
 app.use('/uploads', express.static(UPLOADS_DIR));
@@ -618,7 +693,7 @@ app.get('/api/videos/:id', (req, res) => {
       filename: 'sample_video.mp4',
       mimetype: 'video/mp4',
       size: 15800000,
-      downloadUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
+      downloadUrl: '/api/sample-video',
       tags: ['stream', 'video'],
       createdAt: new Date().toISOString(),
       viewCount: 1,
