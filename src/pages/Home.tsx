@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { UploadCloud, FileVideo, Shield, Zap, Sparkles, Search, Copy, Check, Trash2, ExternalLink, Film, AlertCircle, Palette, Tag, Plus, X, LayoutGrid, List, ArrowUpDown, HardDrive, Eye, Activity, Clock } from 'lucide-react';
-import { cn, formatDuration } from '../lib/utils';
+import { cn, formatDuration, getShareableVideoUrl } from '../lib/utils';
 import { Link, useNavigate } from 'react-router-dom';
 import { formatDistanceToNow } from 'date-fns';
 import { VideoMeta } from '../types';
@@ -944,9 +944,9 @@ export default function Home() {
                           <button 
                             onClick={(e) => {
                               e.preventDefault();
-                              navigator.clipboard.writeText(`${window.location.origin}/v/${video.id}?direct=true`);
+                              navigator.clipboard.writeText(getShareableVideoUrl(video.id, true));
                               setCopiedLink(video.id);
-                              toast.success('Direct video link copied!', 'Link Copied');
+                              toast.success('Shareable video link copied!', 'Link Copied');
                               setTimeout(() => setCopiedLink(null), 2000);
                             }}
                             className={`text-[10px] font-mono flex items-center gap-1 ${
@@ -1126,9 +1126,9 @@ export default function Home() {
                           <button 
                             onClick={(e) => {
                               e.preventDefault();
-                              navigator.clipboard.writeText(`${window.location.origin}/v/${video.id}?direct=true`);
+                              navigator.clipboard.writeText(getShareableVideoUrl(video.id, true));
                               setCopiedLink(video.id);
-                              toast.success('Direct video link copied!', 'Link Copied');
+                              toast.success('Shareable video link copied!', 'Link Copied');
                               setTimeout(() => setCopiedLink(null), 2000);
                             }}
                             className={cn(

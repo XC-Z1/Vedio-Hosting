@@ -4,7 +4,7 @@ import { VideoMeta } from '../types';
 import { ArrowLeft, Loader2, Copy, Check, Download, Eye, Film, Sparkles, HardDrive, Shield, Gauge, Tag, Plus, X, Maximize, Maximize2, Minimize2, QrCode, Code, Share2, SkipBack, SkipForward, PictureInPicture2, Keyboard, HelpCircle } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { motion } from 'motion/react';
-import { formatDuration } from '../lib/utils';
+import { formatDuration, getShareableVideoUrl } from '../lib/utils';
 import { useTheme } from '../ThemeContext';
 import { useToast } from '../ToastContext';
 import { QRCodeSvg } from '../lib/qrSvg';
@@ -26,6 +26,7 @@ export default function VideoView() {
   const [isCleanPlayerMode, setIsCleanPlayerMode] = useState(true);
   const [shareTab, setShareTab] = useState<'direct' | 'link' | 'embed' | 'qr'>('direct');
   const [showShortcutsModal, setShowShortcutsModal] = useState(false);
+  const [isPlaying, setIsPlaying] = useState(false);
 
   const videoRef = useRef<HTMLVideoElement>(null);
 
@@ -177,14 +178,15 @@ export default function VideoView() {
     toast.info(`Playback speed set to ${speed}x`, 'Speed Adjusted');
   };
 
+  const shareUrl = getShareableVideoUrl(id || '', false);
+  const directShareUrl = getShareableVideoUrl(id || '', true);
+
   const handleCopyLink = () => {
     navigator.clipboard.writeText(shareUrl);
     setCopied(true);
     toast.success('Share URL copied to clipboard!', 'Link Copied');
     setTimeout(() => setCopied(false), 2000);
   };
-
-  const directShareUrl = `${window.location.origin}/v/${id}?direct=true`;
 
   const handleCopyDirect = () => {
     navigator.clipboard.writeText(directShareUrl);
@@ -356,7 +358,6 @@ export default function VideoView() {
     }
   };
 
-  const shareUrl = window.location.href;
   const downloadSrc = video.downloadUrl || `/uploads/${video.filename}`;
 
   return (
@@ -409,23 +410,56 @@ export default function VideoView() {
           <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent pointer-events-none z-10" />
           <video 
             ref={videoRef}
-            className="w-full h-full object-contain relative z-20"
+            className="w-full h-full object-contain relative z-20 cursor-pointer"
             controls
             autoPlay
             playsInline
             src={video.dataUrl || video.downloadUrl || `/uploads/${video.filename}`}
             onLoadedMetadata={handleLoadedMetadata}
+            onCanPlay={() => {
+              if (videoRef.current) {
+                videoRef.current.play().catch(() => {
+                  // If browser blocked unmuted autoplay, try muted autoplay
+                  if (videoRef.current) {
+                    videoRef.current.muted = true;
+                    videoRef.current.play().catch(() => {});
+                  }
+                });
+              }
+            }}
             onError={(e) => {
               console.warn('Video playback source warning:', e);
             }}
             onPlay={() => {
+              setIsPlaying(true);
               if (videoRef.current) {
                 videoRef.current.playbackRate = playbackSpeed;
               }
             }}
+            onPause={() => setIsPlaying(false)}
           >
             Your browser does not support the video tag.
           </video>
+
+          {!isPlaying && (
+            <div 
+              onClick={() => {
+                if (videoRef.current) {
+                  videoRef.current.muted = false;
+                  videoRef.current.play().catch(() => {});
+                }
+              }}
+              className="absolute inset-0 z-30 flex items-center justify-center bg-black/40 backdrop-blur-[2px] cursor-pointer group-hover:bg-black/30 transition-all"
+            >
+              <div className="flex flex-col items-center gap-3 bg-black/80 text-white px-8 py-5 rounded-3xl border border-[#00FF88]/40 shadow-2xl shadow-[#00FF88]/20 group-hover:scale-105 transition-transform">
+                <div className="w-16 h-16 rounded-full bg-[#00FF88] flex items-center justify-center text-slate-950 shadow-lg">
+                  <Film className="w-8 h-8 translate-x-0.5" />
+                </div>
+                <span className="font-bold text-sm tracking-wide">Click to Play Video</span>
+                <span className="text-[11px] text-white/60 font-mono">StreamShare Direct Stream</span>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Pro Playback Controls Bar */}

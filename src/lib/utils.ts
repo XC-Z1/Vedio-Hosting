@@ -22,3 +22,11 @@ export function formatDuration(seconds?: number): string {
   return `${pad(mins)}:${pad(secs)}`;
 }
 
+export function getShareableVideoUrl(videoId: string, direct = true): string {
+  let origin = window.location.origin;
+  if (origin.includes('ais-dev-')) {
+    origin = origin.replace('ais-dev-', 'ais-pre-');
+  }
+  return `${origin}/v/${videoId}${direct ? '?direct=true' : ''}`;
+}
+

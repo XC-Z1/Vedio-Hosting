@@ -12,7 +12,7 @@ import Home from './pages/Home';
 import VideoView from './pages/VideoView';
 import { VideoMeta } from './types';
 import VideoPreviewThumbnail from './components/VideoPreviewThumbnail';
-import { formatDuration } from './lib/utils';
+import { formatDuration, getShareableVideoUrl } from './lib/utils';
 import { useTheme, themes, ThemeMode } from './ThemeContext';
 import { useToast } from './ToastContext';
 
@@ -98,9 +98,9 @@ export default function App() {
 
   const [copiedApp, setCopiedApp] = useState<string | null>(null);
   const handleCopyLink = (id: string) => {
-    navigator.clipboard.writeText(`${window.location.origin}/v/${id}?direct=true`);
+    navigator.clipboard.writeText(getShareableVideoUrl(id, true));
     setCopiedApp(id);
-    toast.success('Direct video link copied to clipboard!', 'Link Copied');
+    toast.success('Shareable video link copied to clipboard!', 'Link Copied');
     setTimeout(() => setCopiedApp(null), 2000);
   };
 
