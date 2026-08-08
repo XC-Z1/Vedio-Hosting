@@ -38,7 +38,7 @@ export default function VideoView() {
 
   useEffect(() => {
     if (video) {
-      const initialSrc = video.downloadUrl || `/uploads/${video.filename}` || video.dataUrl || '/api/sample-video';
+      const initialSrc = video.dataUrl || video.downloadUrl || `/uploads/${video.filename}` || '/api/sample-video';
       setActiveVideoSrc(initialSrc);
     }
   }, [video]);

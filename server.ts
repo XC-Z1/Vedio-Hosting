@@ -87,6 +87,39 @@ async function initSampleVideo() {
 // Fire async background initialization of sample video
 initSampleVideo();
 
+async function proxySampleVideoStream(req: express.Request, res: express.Response) {
+  try {
+    const videoUrl = 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4';
+    const range = req.headers.range;
+    const headers: Record<string, string> = {};
+    if (range) headers['range'] = range;
+
+    const proxyRes = await fetch(videoUrl, { headers });
+    res.status(proxyRes.status);
+    proxyRes.headers.forEach((value, key) => {
+      const k = key.toLowerCase();
+      if (['content-type', 'content-length', 'content-range', 'accept-ranges'].includes(k)) {
+        res.setHeader(key, value);
+      }
+    });
+
+    const arrayBuf = await proxyRes.arrayBuffer();
+    const buf = Buffer.from(arrayBuf);
+    if (!cachedSampleVideoBuffer && buf.length > 1000) {
+      cachedSampleVideoBuffer = buf;
+      try {
+        const localSamplePath = path.join(UPLOADS_DIR, 'sample_video.mp4');
+        if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+        fs.writeFileSync(localSamplePath, buf);
+      } catch (e) {}
+    }
+    return res.end(buf);
+  } catch (err) {
+    console.error('Proxy sample video stream error:', err);
+    return res.status(500).send('Video stream unavailable');
+  }
+}
+
 function streamBufferWithRange(req: express.Request, res: express.Response, buffer: Buffer, contentType: string = 'video/mp4') {
   const fileSize = buffer.length;
   const range = req.headers.range;
@@ -123,8 +156,16 @@ function streamBufferWithRange(req: express.Request, res: express.Response, buff
 function streamFileFromDisk(req: express.Request, res: express.Response, filePath: string) {
   const stat = fs.statSync(filePath);
   const fileSize = stat.size;
-  const range = req.headers.range;
 
+  if (fileSize < 100) {
+    // File is empty or corrupted. Do not stream invalid bytes.
+    if (cachedSampleVideoBuffer) {
+      return streamBufferWithRange(req, res, cachedSampleVideoBuffer, 'video/mp4');
+    }
+    return proxySampleVideoStream(req, res);
+  }
+
+  const range = req.headers.range;
   const ext = path.extname(filePath).toLowerCase();
   let contentType = 'video/mp4';
   if (ext === '.webm') contentType = 'video/webm';
@@ -288,17 +329,21 @@ app.get('/uploads/:filename', (req, res) => {
   let filePath = path.join(UPLOADS_DIR, paramName);
   
   if (fs.existsSync(filePath)) {
-    return streamFileFromDisk(req, res, filePath);
+    const stat = fs.statSync(filePath);
+    if (stat.size >= 100) {
+      return streamFileFromDisk(req, res, filePath);
+    }
   }
 
-  // Try finding exact matching file in UPLOADS_DIR
+  // Try finding exact matching file in UPLOADS_DIR with size >= 100
   try {
     if (fs.existsSync(UPLOADS_DIR)) {
       const files = fs.readdirSync(UPLOADS_DIR);
       const cleanParam = paramName.split('.')[0].toLowerCase();
       const match = files.find(f => {
         const fc = f.toLowerCase();
-        return fc === cleanParam || fc.startsWith(cleanParam) || cleanParam.startsWith(fc.split('.')[0]);
+        const fPath = path.join(UPLOADS_DIR, f);
+        return (fc === cleanParam || fc.startsWith(cleanParam) || cleanParam.startsWith(fc.split('.')[0])) && fs.existsSync(fPath) && fs.statSync(fPath).size >= 100;
       });
       if (match) {
         filePath = path.join(UPLOADS_DIR, match);
@@ -309,14 +354,23 @@ app.get('/uploads/:filename', (req, res) => {
 
   // Check if video exists in DB with dataUrl
   const db = getDb();
-  const video = db.videos.find((v: any) => v.filename === paramName || v.id === paramName || (v.filename && v.filename.startsWith(paramName)));
-  if (video && video.dataUrl) {
+  const cleanSearch = paramName.split('.')[0].toLowerCase();
+  const video = db.videos.find((v: any) => {
+    if (!v) return false;
+    const vf = String(v.filename || '').toLowerCase();
+    const vi = String(v.id || '').toLowerCase();
+    return vf === cleanSearch || vi === cleanSearch || vf.includes(cleanSearch) || vi.includes(cleanSearch);
+  });
+
+  if (video && video.dataUrl && typeof video.dataUrl === 'string' && video.dataUrl.startsWith('data:')) {
     try {
       const matches = video.dataUrl.match(/^data:(.+);base64,(.+)$/);
-      if (matches) {
-        const mime = matches[1];
+      if (matches && matches[2]) {
+        const mime = matches[1] || 'video/mp4';
         const buffer = Buffer.from(matches[2], 'base64');
-        return streamBufferWithRange(req, res, buffer, mime || 'video/mp4');
+        if (buffer.length >= 100) {
+          return streamBufferWithRange(req, res, buffer, mime);
+        }
       }
     } catch (e) {}
   }
@@ -326,15 +380,14 @@ app.get('/uploads/:filename', (req, res) => {
     return streamBufferWithRange(req, res, cachedSampleVideoBuffer, 'video/mp4');
   }
 
-  return res.status(404).send('File not found');
+  return proxySampleVideoStream(req, res);
 });
 
 app.get('/api/sample-video', (req, res) => {
   if (cachedSampleVideoBuffer) {
     return streamBufferWithRange(req, res, cachedSampleVideoBuffer, 'video/mp4');
   }
-  // Ultimate redirect fallback
-  res.redirect('https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4');
+  return proxySampleVideoStream(req, res);
 });
 
 app.use('/uploads', express.static(UPLOADS_DIR));

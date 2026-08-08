@@ -423,7 +423,7 @@ export default function App() {
                 Close <X className="w-4 h-4" />
               </button>
               <video
-                src={previewVideo.downloadUrl || `/uploads/${previewVideo.filename}`}
+                src={previewVideo.dataUrl || previewVideo.downloadUrl || `/uploads/${previewVideo.filename}` || '/api/sample-video'}
                 controls
                 autoPlay
                 className="w-full h-full object-contain"

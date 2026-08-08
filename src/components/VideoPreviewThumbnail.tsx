@@ -29,7 +29,7 @@ export default function VideoPreviewThumbnail({
   const [imageFailed, setImageFailed] = useState(false);
   const [videoError, setVideoError] = useState(false);
 
-  const videoSource = video.dataUrl || `/uploads/${video.filename}`;
+  const videoSource = video.dataUrl || video.downloadUrl || `/uploads/${video.filename}` || '/api/sample-video';
 
   // 1. Sync thumbnail from video prop or generate automatically if missing
   useEffect(() => {
