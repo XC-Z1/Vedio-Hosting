@@ -16,13 +16,17 @@ export default function VideoView() {
   const [error, setError] = useState('');
   const [copied, setCopied] = useState(false);
   const [copiedEmbed, setCopiedEmbed] = useState(false);
+  const [copiedDirect, setCopiedDirect] = useState(false);
   const [duration, setDuration] = useState<number | undefined>(undefined);
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(1);
   const [newTagInput, setNewTagInput] = useState('');
   const [isAddingTag, setIsAddingTag] = useState(false);
   
   const [isTheatreMode, setIsTheatreMode] = useState(false);
-  const [shareTab, setShareTab] = useState<'link' | 'embed' | 'qr'>('link');
+  const [isCleanPlayerMode, setIsCleanPlayerMode] = useState(() => {
+    return window.location.search.includes('direct=true') || window.location.search.includes('clean=true') || window.location.search.includes('mode=direct');
+  });
+  const [shareTab, setShareTab] = useState<'link' | 'direct' | 'embed' | 'qr'>('direct');
   const [showShortcutsModal, setShowShortcutsModal] = useState(false);
 
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -199,10 +203,19 @@ export default function VideoView() {
   };
 
   const handleCopyLink = () => {
-    navigator.clipboard.writeText(window.location.href);
+    navigator.clipboard.writeText(shareUrl);
     setCopied(true);
-    toast.success('Direct share URL copied to clipboard!', 'Link Copied');
+    toast.success('Share URL copied to clipboard!', 'Link Copied');
     setTimeout(() => setCopied(false), 2000);
+  };
+
+  const directShareUrl = `${window.location.origin}/v/${id}?direct=true`;
+
+  const handleCopyDirect = () => {
+    navigator.clipboard.writeText(directShareUrl);
+    setCopiedDirect(true);
+    toast.success('Direct Video Link copied! Anyone with this link sees ONLY the video.', 'Direct Link Copied');
+    setTimeout(() => setCopiedDirect(false), 2000);
   };
 
   const embedCodeSnippet = video ? `<iframe src="${window.location.href}" width="640" height="360" frameborder="0" allowfullscreen></iframe>` : '';
@@ -372,17 +385,28 @@ export default function VideoView() {
   const downloadSrc = video.downloadUrl || `/uploads/${video.filename}`;
 
   return (
-    <div className={`grid grid-cols-1 ${isTheatreMode ? '' : 'lg:grid-cols-12'} gap-8 h-full pb-10 transition-all duration-300`}>
-      <div className={`col-span-1 ${isTheatreMode ? 'w-full' : 'lg:col-span-8'} flex flex-col gap-6`}>
+    <div className={`grid grid-cols-1 ${isTheatreMode || isCleanPlayerMode ? '' : 'lg:grid-cols-12'} gap-8 h-full pb-10 transition-all duration-300`}>
+      <div className={`col-span-1 ${isTheatreMode || isCleanPlayerMode ? 'w-full max-w-5xl mx-auto' : 'lg:col-span-8'} flex flex-col gap-6`}>
         
-        {/* Top Header Navigation & Theatre Mode Controls */}
-        <div className="flex items-center justify-between">
+        {/* Top Header Navigation & Mode Controls */}
+        <div className="flex items-center justify-between gap-2 flex-wrap">
           <Link to="/" className={`inline-flex items-center gap-2 text-xs font-mono ${config.textSecondary} hover:${config.accentColor} transition-colors group`}>
             <ArrowLeft className="w-4 h-4 group-hover:-translate-x-1 transition-transform" />
-            <span>Back to Assets Dashboard</span>
+            <span>Back to Dashboard</span>
           </Link>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              onClick={() => setIsCleanPlayerMode(prev => !prev)}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border ${config.borderClass} ${
+                isCleanPlayerMode ? 'bg-[#00FF88] text-slate-950 font-bold shadow-lg' : `${config.cardBgClass} ${config.textSecondary} hover:${config.textPrimary}`
+              } text-xs font-mono transition-all`}
+              title="Toggle Direct Video Mode"
+            >
+              <Film className="w-3.5 h-3.5" />
+              <span>{isCleanPlayerMode ? 'Full Studio' : 'Direct Video View'}</span>
+            </button>
+
             <button
               onClick={() => setShowShortcutsModal(true)}
               className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border ${config.borderClass} ${config.cardBgClass} text-xs font-mono ${config.textSecondary} hover:${config.textPrimary} transition-all`}
@@ -581,7 +605,19 @@ export default function VideoView() {
             </div>
 
             {/* Studio Navigation Tabs */}
-            <div className="flex items-center gap-1 p-1 rounded-xl bg-black/10 dark:bg-white/5 border border-white/10">
+            <div className="flex items-center gap-1 p-1 rounded-xl bg-black/10 dark:bg-white/5 border border-white/10 flex-wrap">
+              <button
+                onClick={() => setShareTab('direct')}
+                className={`px-3 py-1 rounded-lg text-xs font-mono transition-all flex items-center gap-1.5 ${
+                  shareTab === 'direct'
+                    ? 'bg-[#00FF88] text-slate-950 font-bold shadow-md'
+                    : `${config.textSecondary} hover:${config.textPrimary}`
+                }`}
+              >
+                <Film className="w-3.5 h-3.5" />
+                <span>Direct Video Link</span>
+              </button>
+
               <button
                 onClick={() => setShareTab('link')}
                 className={`px-3 py-1 rounded-lg text-xs font-mono transition-all flex items-center gap-1.5 ${
@@ -591,7 +627,7 @@ export default function VideoView() {
                 }`}
               >
                 <Share2 className="w-3.5 h-3.5" />
-                <span>Direct Link</span>
+                <span>Standard Link</span>
               </button>
 
               <button
@@ -620,11 +656,36 @@ export default function VideoView() {
             </div>
           </div>
 
+          {/* TAB 0: Direct Video Link */}
+          {shareTab === 'direct' && (
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 animate-in fade-in">
+              <div className="min-w-0 flex-1">
+                <p className={`text-[10px] font-mono uppercase tracking-widest ${config.textSecondary} mb-1`}>Direct Video Link (Zero Clutter)</p>
+                <p className={`font-mono text-xs sm:text-sm text-[#00FF88] truncate ${theme === 'light' ? 'bg-slate-100 border-slate-200' : 'bg-black/40 border-white/10'} px-3 py-2 rounded-xl border select-all`}>{directShareUrl}</p>
+                <p className="text-[10px] font-mono text-white/50 mt-1">Friends opening this link will see ONLY the video player directly!</p>
+              </div>
+              <button
+                onClick={handleCopyDirect}
+                className={`shrink-0 inline-flex items-center justify-center gap-2 px-6 py-3 rounded-2xl bg-[#00FF88] text-slate-950 font-bold text-xs shadow-lg transition-all hover:scale-105`}
+              >
+                {copiedDirect ? (
+                  <>
+                    <Check className="w-4 h-4" /> Link Copied!
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-4 h-4" /> Copy Direct Link
+                  </>
+                )}
+              </button>
+            </div>
+          )}
+
           {/* TAB 1: Direct Link */}
           {shareTab === 'link' && (
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 animate-in fade-in">
               <div className="min-w-0 flex-1">
-                <p className={`text-[10px] font-mono uppercase tracking-widest ${config.textSecondary} mb-1`}>Direct Shareable Link</p>
+                <p className={`text-[10px] font-mono uppercase tracking-widest ${config.textSecondary} mb-1`}>Standard Studio Link</p>
                 <p className={`font-mono text-xs sm:text-sm ${config.accentColor} truncate ${theme === 'light' ? 'bg-slate-100 border-slate-200' : 'bg-black/40 border-white/10'} px-3 py-2 rounded-xl border select-all`}>{shareUrl}</p>
               </div>
               <button
@@ -740,41 +801,43 @@ export default function VideoView() {
       )}
       
       {/* Sidebar Metadata Card */}
-      <div className={`col-span-1 lg:col-span-4 flex flex-col gap-4 lg:border-l ${config.borderClass} lg:pl-8`}>
-        <h3 className={`text-xs font-semibold uppercase tracking-widest ${config.textSecondary} mb-2`}>Asset Details</h3>
-        
-        <div className={`p-6 rounded-2xl border ${config.borderClass} ${config.cardBgClass} space-y-5 shadow-xl`}>
-          <div className={`pb-4 border-b ${config.borderClass}`}>
-            <p className={`text-[10px] font-mono uppercase ${config.textSecondary} mb-1`}>Unique Asset ID</p>
-            <p className={`font-mono text-xs ${config.textPrimary} break-all select-all`}>{video.id}</p>
-          </div>
-
-          {duration !== undefined && duration > 0 && (
+      {!isCleanPlayerMode && !isTheatreMode && (
+        <div className={`col-span-1 lg:col-span-4 flex flex-col gap-4 lg:border-l ${config.borderClass} lg:pl-8`}>
+          <h3 className={`text-xs font-semibold uppercase tracking-widest ${config.textSecondary} mb-2`}>Asset Details</h3>
+          
+          <div className={`p-6 rounded-2xl border ${config.borderClass} ${config.cardBgClass} space-y-5 shadow-xl`}>
             <div className={`pb-4 border-b ${config.borderClass}`}>
-              <p className={`text-[10px] font-mono uppercase ${config.textSecondary} mb-1`}>Runtime Duration</p>
-              <p className={`font-mono text-xs ${config.accentColor} font-bold`}>{formatDuration(duration)}</p>
+              <p className={`text-[10px] font-mono uppercase ${config.textSecondary} mb-1`}>Unique Asset ID</p>
+              <p className={`font-mono text-xs ${config.textPrimary} break-all select-all`}>{video.id}</p>
             </div>
-          )}
 
-          <div className={`pb-4 border-b ${config.borderClass}`}>
-            <p className={`text-[10px] font-mono uppercase ${config.textSecondary} mb-1`}>MIME Format</p>
-            <p className="font-mono text-xs text-cyan-400">{video.mimetype}</p>
-          </div>
+            {duration !== undefined && duration > 0 && (
+              <div className={`pb-4 border-b ${config.borderClass}`}>
+                <p className={`text-[10px] font-mono uppercase ${config.textSecondary} mb-1`}>Runtime Duration</p>
+                <p className={`font-mono text-xs ${config.accentColor} font-bold`}>{formatDuration(duration)}</p>
+              </div>
+            )}
 
-          <div className={`pb-4 border-b ${config.borderClass}`}>
-            <p className={`text-[10px] font-mono uppercase ${config.textSecondary} mb-1`}>Views Count</p>
-            <div className="flex items-center gap-2 mt-0.5">
-              <Eye className={`w-4 h-4 ${config.textSecondary}`} />
-              <span className={`font-mono text-xs font-semibold ${config.textPrimary}`}>{video.viewCount || 1} Views</span>
+            <div className={`pb-4 border-b ${config.borderClass}`}>
+              <p className={`text-[10px] font-mono uppercase ${config.textSecondary} mb-1`}>MIME Format</p>
+              <p className="font-mono text-xs text-cyan-400">{video.mimetype}</p>
             </div>
-          </div>
 
-          <div>
-            <p className={`text-[10px] font-mono uppercase ${config.textSecondary} mb-1`}>System Filename</p>
-            <p className={`font-mono text-xs ${config.textSecondary} break-all`}>{video.filename}</p>
+            <div className={`pb-4 border-b ${config.borderClass}`}>
+              <p className={`text-[10px] font-mono uppercase ${config.textSecondary} mb-1`}>Views Count</p>
+              <div className="flex items-center gap-2 mt-0.5">
+                <Eye className={`w-4 h-4 ${config.textSecondary}`} />
+                <span className={`font-mono text-xs font-semibold ${config.textPrimary}`}>{video.viewCount || 1} Views</span>
+              </div>
+            </div>
+
+            <div>
+              <p className={`text-[10px] font-mono uppercase ${config.textSecondary} mb-1`}>System Filename</p>
+              <p className={`font-mono text-xs ${config.textSecondary} break-all`}>{video.filename}</p>
+            </div>
           </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }
