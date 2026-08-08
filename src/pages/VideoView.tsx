@@ -562,7 +562,25 @@ export default function VideoView() {
             </div>
           </div>
 
-          <div className="flex items-center gap-3 shrink-0">
+          <div className="flex items-center gap-2.5 shrink-0 flex-wrap sm:flex-nowrap">
+            <button
+              onClick={handleCopyDirect}
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-2xl bg-[#00FF88] hover:bg-[#00e67a] text-slate-950 font-bold text-xs transition-all shadow-lg shadow-[#00FF88]/20 hover:scale-105 active:scale-95 cursor-pointer"
+              title="Copy shareable video link to clipboard"
+            >
+              {copiedDirect ? (
+                <>
+                  <Check className="w-4 h-4" />
+                  <span>Link Copied!</span>
+                </>
+              ) : (
+                <>
+                  <Copy className="w-4 h-4" />
+                  <span>Copy Video Link</span>
+                </>
+              )}
+            </button>
+
             <a
               href={downloadSrc}
               download={video.originalName}
