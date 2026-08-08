@@ -11,4 +11,5 @@ export interface VideoMeta {
   tags?: string[];
   dataUrl?: string;
   thumbnailUrl?: string;
+  public?: boolean;
 }

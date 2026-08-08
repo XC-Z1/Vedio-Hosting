@@ -35,13 +35,34 @@ export default function VideoView() {
   useEffect(() => {
     if (!id) return;
 
+    const checkOwner = (videoId: string) => {
+      const saved = localStorage.getItem('recent_videos');
+      if (saved) {
+        try {
+          const parsed = JSON.parse(saved) as VideoMeta[];
+          return parsed.some(v => v.id === videoId);
+        } catch (e) {}
+      }
+      return false;
+    };
+
     fetch(`/api/videos/${id}`)
       .then(res => {
         if (!res.ok) throw new Error('Video not found');
         return res.json();
       })
       .then(data => {
-        setVideo(data);
+        const isOwner = checkOwner(id);
+        const isPublic = data.public !== false; // If 'public' flag is not explicitly false, allow public access
+
+        if (!isPublic && !isOwner) {
+          throw new Error('This video is set to private and can only be accessed by its owner.');
+        }
+
+        setVideo({
+          ...data,
+          public: data.public !== undefined ? data.public : true
+        });
         if (data.duration) setDuration(data.duration);
         if (data.originalName) {
           document.title = `${data.originalName} - StreamShare Pro`;
@@ -69,7 +90,15 @@ export default function VideoView() {
             const parsed = JSON.parse(saved) as VideoMeta[];
             const found = parsed.find(v => v.id === id);
             if (found) {
-              setVideo(found);
+              const isOwner = true;
+              const isPublic = found.public !== false;
+              if (!isPublic && !isOwner) {
+                throw new Error('This video is set to private and can only be accessed by its owner.');
+              }
+              setVideo({
+                ...found,
+                public: found.public !== undefined ? found.public : true
+              });
               if (found.duration) setDuration(found.duration);
               if (found.originalName) {
                 document.title = `${found.originalName} - StreamShare Pro`;
@@ -79,7 +108,7 @@ export default function VideoView() {
             }
           } catch (e) {}
         }
-        setError(err.message);
+        setError(err.message || 'Video not found');
         setLoading(false);
       });
 
@@ -259,9 +288,11 @@ export default function VideoView() {
           animate={{ y: 0, opacity: 1 }}
           transition={{ delay: 0.2 }}
         >
-          <h2 className="text-2xl font-serif italic text-white mb-2">Asset Not Available</h2>
+          <h2 className="text-2xl font-serif italic text-white mb-2">
+            {error?.includes('private') ? 'Private Video' : 'Asset Not Available'}
+          </h2>
           <p className="text-xs text-white/50 leading-relaxed font-light mb-6">
-            This media file has been removed or the share link has expired.
+            {error || 'This media file has been removed or the share link has expired.'}
           </p>
           <Link to="/" className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-[#00FF88] text-black font-semibold text-xs transition-transform hover:scale-105 shadow-lg">
             <ArrowLeft className="w-4 h-4" /> Return to Dashboard
@@ -453,8 +484,8 @@ export default function VideoView() {
               <div className={`inline-flex items-center gap-2 px-3 py-1 rounded-full ${config.badgeClass} text-[10px] font-mono`}>
                 <Film className="w-3 h-3" /> Uncompressed Source
               </div>
-              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[10px] font-mono font-medium">
-                <Shield className="w-3 h-3" /> Private Link-Only
+              <div className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full ${video.public === false ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'} text-[10px] font-mono font-medium`}>
+                <Shield className="w-3 h-3" /> {video.public === false ? 'Private (Owner Only)' : 'Public Shared Link'}
               </div>
             </div>
             <h2 className={`text-3xl sm:text-4xl font-serif italic ${config.textPrimary} break-all leading-tight`}>{video.originalName}</h2>

@@ -307,7 +307,8 @@ app.post('/api/upload-direct', (req, res) => {
         tags: parsedTags,
         viewCount: 0,
         dataUrl,
-        thumbnailUrl: typeof thumbnailUrl === 'string' && thumbnailUrl.startsWith('data:') ? thumbnailUrl : undefined
+        thumbnailUrl: typeof thumbnailUrl === 'string' && thumbnailUrl.startsWith('data:') ? thumbnailUrl : undefined,
+        public: req.body.public !== undefined ? (req.body.public === 'true' || req.body.public === true) : true
       };
 
       db.videos.unshift(newVideo);
@@ -400,7 +401,8 @@ app.post('/api/upload-complete', async (req, res) => {
       createdAt: new Date().toISOString(),
       viewCount: 0,
       dataUrl,
-      thumbnailUrl: typeof thumbnailUrl === 'string' && thumbnailUrl.startsWith('data:') ? thumbnailUrl : undefined
+      thumbnailUrl: typeof thumbnailUrl === 'string' && thumbnailUrl.startsWith('data:') ? thumbnailUrl : undefined,
+      public: req.body.public !== undefined ? Boolean(req.body.public) : true
     };
 
     const db = getDb();
@@ -425,7 +427,7 @@ app.get('/api/videos', (req, res) => {
 
 app.post('/api/videos/register', express.json({ limit: '100mb' }), (req, res) => {
   try {
-    const { id, filename, originalName, mimetype, size, downloadUrl, tags, createdAt, viewCount, dataUrl, thumbnailUrl } = req.body;
+    const { id, filename, originalName, mimetype, size, downloadUrl, tags, createdAt, viewCount, dataUrl, thumbnailUrl, public: isPublic } = req.body;
     if (!id) {
       return res.status(400).json({ error: 'Missing video ID' });
     }
@@ -461,7 +463,8 @@ app.post('/api/videos/register', express.json({ limit: '100mb' }), (req, res) =>
       createdAt: createdAt || new Date().toISOString(),
       viewCount: viewCount || 0,
       dataUrl,
-      thumbnailUrl
+      thumbnailUrl,
+      public: isPublic !== undefined ? Boolean(isPublic) : true
     };
 
     if (existingIndex >= 0) {
@@ -506,7 +509,8 @@ app.get('/api/videos/:id', (req, res) => {
             downloadUrl: `/uploads/${match}`,
             tags: [],
             createdAt: stat.birthtime.toISOString(),
-            viewCount: 1
+            viewCount: 1,
+            public: true
           };
           db.videos.unshift(video);
           saveDb(db);
@@ -519,7 +523,24 @@ app.get('/api/videos/:id', (req, res) => {
     return res.status(404).json({ error: 'Video not found' });
   }
   
-  res.json(video);
+  res.json({
+    ...video,
+    public: video.public !== undefined ? video.public : true
+  });
+});
+
+app.put('/api/videos/:id/privacy', express.json(), (req, res) => {
+  const db = getDb();
+  const video = db.videos.find((v: any) => v.id === req.params.id);
+  if (!video) {
+    return res.status(404).json({ error: 'Video not found' });
+  }
+
+  const { isPublic } = req.body;
+  video.public = Boolean(isPublic);
+  saveDb(db);
+
+  res.json({ success: true, public: video.public });
 });
 
 app.post('/api/videos/:id/view', (req, res) => {
